@@ -21,9 +21,9 @@ from orders import OrderOpenError, human_pause, open_candidate
 
 log = logging.getLogger("profi.respond")
 
-TARIFFS_CTA = '[data-testid="orderCard/tariffs"] >> text=Продолжить'
-BID_WINDOW = '[data-testid="bid_window_container"]'
-PAY_BUTTON_TESTID = '[data-testid="payment_methods_form_pay_button"]'
+TARIFFS_BLOCK_TESTID = "orderCard/tariffs"
+BID_WINDOW_TESTID = "bid_window_container"
+PAY_BUTTON_TESTID = "payment_methods_form_pay_button"
 
 
 class RespondError(Exception):
@@ -33,12 +33,12 @@ class RespondError(Exception):
 def open_respond_form(ctx: BrowserContext, feed_page: Page, order_id: str) -> Page:
     """Открыть заказ и форму отклика (без заполнения)."""
     order_page, _captured = open_candidate(ctx, feed_page, order_id)
-    cta = order_page.locator(TARIFFS_CTA)
+    cta = order_page.get_by_test_id(TARIFFS_BLOCK_TESTID).get_by_text("Продолжить")
     if cta.count() == 0:
         raise RespondError("CTA «Продолжить» не найден в блоке тарифов")
     human_pause(0.8, 2.0)
     cta.first.click(delay=random.randint(70, 150))
-    order_page.locator(BID_WINDOW).wait_for(timeout=15_000)
+    order_page.get_by_test_id(BID_WINDOW_TESTID).wait_for(timeout=15_000)
     human_pause(0.5, 1.2)
     return order_page
 
@@ -57,7 +57,7 @@ def _type_human(page: Page, locator, text: str) -> None:
 
 def fill_form(order_page: Page, rate: int, text: str) -> dict:
     """Заполнить stavka + comments4client. Единица «час» — дефолт, не трогаем."""
-    win = order_page.locator(BID_WINDOW).first
+    win = order_page.get_by_test_id(BID_WINDOW_TESTID).first
     inputs = win.locator("input")
     textarea = win.locator("textarea").first
     if textarea.count() == 0:
@@ -77,7 +77,7 @@ def fill_form(order_page: Page, rate: int, text: str) -> dict:
 
 def read_footer(order_page: Page) -> dict:
     """К оплате / баланс / текст кнопки из окна формы."""
-    win = order_page.locator(BID_WINDOW).first
+    win = order_page.get_by_test_id(BID_WINDOW_TESTID).first
     txt = win.inner_text(timeout=5_000)
     out = {"footer_text": txt[-400:]}
     m = re.search(r"К оплате:\s*([\d\s\u00a0]+)\s*₽", txt)
@@ -87,7 +87,7 @@ def read_footer(order_page: Page) -> dict:
     if len(ms) >= 2:
         # футер: «К оплате: N ₽ … <баланс> ₽» — баланс идёт последним
         out["balance_seen"] = int(ms[-1].replace(" ", "").replace("\u00a0", ""))
-    btn = order_page.locator(PAY_BUTTON_TESTID)
+    btn = order_page.get_by_test_id(PAY_BUTTON_TESTID)
     if btn.count() == 0:
         btn = win.get_by_text("Откликнуться", exact=True)
     out["send_button_found"] = btn.count() > 0
@@ -112,9 +112,11 @@ def click_send(order_page: Page, ctx: BrowserContext) -> dict:
 
     ctx.on("response", on_response)
     try:
-        btn = order_page.locator(PAY_BUTTON_TESTID)
+        btn = order_page.get_by_test_id(PAY_BUTTON_TESTID)
         if btn.count() == 0:
-            btn = order_page.locator(BID_WINDOW).first.get_by_text("Откликнуться", exact=True)
+            btn = order_page.get_by_test_id(BID_WINDOW_TESTID).first.get_by_text(
+                "Откликнуться", exact=True
+            )
         if btn.count() == 0:
             raise RespondError("кнопка «Откликнуться» не найдена")
         human_pause(1.5, 3.0)

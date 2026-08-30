@@ -49,6 +49,8 @@ class BrowserManager:
     def start(self) -> str:
         """INITIALIZING → CONNECT_CDP → FIND_FEED_PAGE → SESSION_CHECK. Возвращает READY/AUTH_REQUIRED/..."""
         self._pw = sync_playwright().start()
+        # data-testid — родной атрибут Профи: включаем testid-движок локаторов
+        self._pw.selectors.set_test_id_attribute("data-testid")
         self.browser = self._connect()
         if self.browser is None:
             self.browser = self._launch_and_connect()

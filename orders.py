@@ -55,7 +55,7 @@ def open_candidate(ctx: BrowserContext, feed_page: Page, order_id: str) -> tuple
 
     ctx.on("response", on_response)
     try:
-        card = feed_page.locator(f'[data-testid="{order_id}_order-snippet"]')
+        card = feed_page.get_by_test_id(f"{order_id}_order-snippet")
         if card.count() == 0:
             raise OrderOpenError(f"карточка #{order_id} не найдена в ленте (data-testid)")
         card.scroll_into_view_if_needed(timeout=10_000)
@@ -76,7 +76,7 @@ def open_candidate(ctx: BrowserContext, feed_page: Page, order_id: str) -> tuple
         qs = parse_qs(urlparse(order_page.url).query)
         if f"{order_id}" not in (qs.get("o") or []):
             raise OrderOpenError(f"открылся не тот заказ: url={order_page.url[:120]}")
-        order_page.locator('[data-testid="order_card_container"]').wait_for(timeout=30_000)
+        order_page.get_by_test_id("order_card_container").wait_for(timeout=30_000)
         # даём доедреть BoOrderScreen/UpdateOrderViewingEvent
         deadline = time.monotonic() + 8.0
         while time.monotonic() < deadline and not captured:
@@ -94,8 +94,13 @@ def extract_dom_texts(order_page: Page) -> dict:
     """Selective DOM extraction (спека §20, Priority 2): UI-only поля карточки."""
     out: dict = {}
     try:
-        container = order_page.locator('[data-testid="order_card_container"]')
+        container = order_page.get_by_test_id("order_card_container")
         out["container_text"] = container.inner_text(timeout=5_000)
+        # aria_snapshot — структурированный YAML (устойчивее регэкспов, вход для LLM)
+        try:
+            out["container_aria"] = container.aria_snapshot()
+        except Exception:
+            pass
     except Exception as e:
         out["container_error"] = str(e)
     return out
@@ -105,6 +110,7 @@ def parse_competition_position(text: str | None) -> int | None:
     """«В этом заказе ваш отклик будет 16-м по рейтингу» → 16."""
     if not text:
         return None
+    text = text.replace("\u00a0", " ")
     m = re.search(r"отклик будет\s+(\d+)", text)
     return int(m.group(1)) if m else None
 
@@ -181,18 +187,19 @@ def _extract_client_block(dom_text: str | None) -> dict:
     out: dict = {}
     if not dom_text:
         return out
-    m = re.search(r"На Профи\.?\w*\s+(?:с|ру[сc]?)[^\n]*?(\d{4})", dom_text) or re.search(
-        r"На Профи[^\n]*?(\d{1,2}\s+\w+\s+\d{4})", dom_text
+    text = dom_text.replace("\u00a0", " ")
+    m = re.search(r"На Профи\.?\w*\s+(?:с|ру[сc]?)[^\n]*?(\d{4})", text) or re.search(
+        r"На Профи[^\n]*?(\d{1,2}\s+\w+\s+\d{4})", text
     )
     if m:
         out["profile_since"] = m.group(1)
-    out["phone_verified"] = "подтверди" in dom_text.lower()
-    out["last_online_online_now"] = bool(re.search(r"В сети\s*$", dom_text, re.M))
-    m = re.search(r"Оставил[аы]?\s*(\d+)\s*отзыв", dom_text)
+    out["phone_verified"] = "подтверди" in text.lower()
+    out["last_online_online_now"] = bool(re.search(r"В сети\s*$", text, re.M))
+    m = re.search(r"Оставил[аы]?\s*(\d+)\s*отзыв", text)
     if m:
         out["reviews"] = int(m.group(1))
     # имя — строка после блока «шансы на заказ» (возможна строка-аватар «О»)
-    m = re.search(r"шансы на заказ[^\n]*\n+(?:[А-ЯЁ]\n+)?([А-ЯЁ][а-яё]+)\n", dom_text)
+    m = re.search(r"шансы на заказ[^\n]*\n+(?:[А-ЯЁ]\n+)?([А-ЯЁ][а-яё]+)\n", text)
     if m:
         out["name"] = m.group(1)
     return out
