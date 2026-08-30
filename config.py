@@ -44,6 +44,10 @@ MIN_RATE = 2000           # сохранённый фильтр аккаунта
 VACANCY_PATTERNS = ["ваканс"]
 REMOTE_ONLY = True        # geo.remote пуст → только очно → skip
 
+# --- Денежные предохранители (RULES.md §2; ревью P0-2) ---
+MAX_RESPONSE_PRICE_RUB = 500   # отклик дороже — отмена отправки
+DAILY_SEND_LIMIT = 3           # платных отправок за сутки максимум
+
 LOG_LEVEL = os.environ.get("PROFI_LOG_LEVEL", "INFO")
 
 # --- Кандидаты и детали (спека §16, §19-22) ---

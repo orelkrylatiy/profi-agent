@@ -142,6 +142,19 @@ class Store:
         self.conn.commit()
         return cur.rowcount > 0
 
+    def sends_today(self) -> int:
+        """Сколько платных откликов отправлено с начала суток (для DAILY_SEND_LIMIT)."""
+        import datetime as _dt
+
+        midnight = int(
+            _dt.datetime.now().replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+        )
+        row = self.conn.execute(
+            "SELECT COUNT(*) FROM candidates WHERE send_status='sent' AND sent_at >= ?",
+            (midnight,),
+        ).fetchone()
+        return int(row[0])
+
     def ensure_candidate(self, order_id: str, title: str | None) -> None:
         """Минимальная запись кандидата, если её ещё нет (не сбрасывает статусы)."""
         now = int(time.time())

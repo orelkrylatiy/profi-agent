@@ -121,9 +121,10 @@ def run_cycle(bm: BrowserManager, store: store_mod.Store) -> str:
     try:
         snap = capture.reload_and_capture()
     except FeedAuthError as e:
-        log.error("%s", e)
-        show_login_hint()
-        return AUTH_REQUIRED
+        # 401/403 на graphql: сессия или антибот. НЕ дёргаем ленту 30 с
+        # (RULES.md §3): cooldown AUTH_COOLDOWN_S обрабатывает run_loop.
+        log.error("FEED_AUTH_COOLDOWN: %s — пауза %d мин", e, config.AUTH_COOLDOWN_S // 60)
+        return "FEED_AUTH_COOLDOWN"
     except FeedAmbiguous as e:
         log.error("FEED_AMBIGUOUS: %s", e)
         save_capture_diag(capture.last_diag, str(e))
@@ -195,6 +196,13 @@ def run_loop(max_cycles: int | None = None) -> int:
             if max_cycles is not None and done >= max_cycles:
                 log.info("отработано %d циклов — выхожу", done)
                 return 0
+            if state == "FEED_AUTH_COOLDOWN":
+                log.warning(
+                    "401/403: стоп мониторинга на %d мин (RULES.md). Проверь браузер руками.",
+                    config.AUTH_COOLDOWN_S // 60,
+                )
+                time.sleep(config.AUTH_COOLDOWN_S)
+                continue
             if state == AUTH_REQUIRED:
                 time.sleep(config.AUTH_WAIT_S)
                 continue
@@ -281,6 +289,25 @@ def run_respond(order_id: str, rate: int, text: str, send: bool) -> int:
             order_page.close(run_before_unload=False)
             return 1
 
+        # денежные предохранители (RULES.md §2, ревью P0-2)
+        if footer["to_pay"] > config.MAX_RESPONSE_PRICE_RUB:
+            log.error(
+                "ОТМЕНА: к оплате %s ₽ > потолка %s ₽ (MAX_RESPONSE_PRICE_RUB)",
+                footer["to_pay"], config.MAX_RESPONSE_PRICE_RUB,
+            )
+            time.sleep(1.5)
+            order_page.close(run_before_unload=False)
+            return 1
+        sent_today = store.sends_today()
+        if sent_today >= config.DAILY_SEND_LIMIT:
+            log.error(
+                "ОТМЕНА: дневной лимит отправок (%d/%d, DAILY_SEND_LIMIT)",
+                sent_today, config.DAILY_SEND_LIMIT,
+            )
+            time.sleep(1.5)
+            order_page.close(run_before_unload=False)
+            return 1
+
         log.warning("ОТПРАВЛЯЮ ПЛАТНЫЙ ОТКЛИК #%s (к оплате %s ₽)…", order_id, footer["to_pay"])
         outcome = respond_mod.click_send(order_page, ctx)
         shot2 = out_dir / f"{order_id}_{stamp}_after.png"
@@ -290,7 +317,10 @@ def run_respond(order_id: str, rate: int, text: str, send: bool) -> int:
             json.dumps({"footer": footer, "outcome": outcome}, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
-        ok = bool(outcome.get("rpc"))
+        # успех: редирект на чат заказа (r.php?id=<order>) — основной сигнал;
+        # RPC-200 — дополнительный (ревью P1-3)
+        ok = (f"r.php" in outcome.get("url_after", "")
+              and f"id={order_id}" in outcome.get("url_after", "")) or bool(outcome.get("rpc"))
         store.set_send_status(order_id, "sent" if ok else "unknown")
         log.info("send_status=%s | скриншоты: %s, %s", "sent" if ok else "unknown", shot.name, shot2.name)
         return 0 if ok else 1
