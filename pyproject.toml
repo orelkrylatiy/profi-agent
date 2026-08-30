@@ -1,0 +1,8 @@
+[project]
+name = "profi-worker"
+version = "0.1.0"
+description = "Контур A: воркер откликов Профи.ру (читатель ленты → триаж → черновик → человек)"
+requires-python = ">=3.11"
+dependencies = [
+    "playwright>=1.45",
+]

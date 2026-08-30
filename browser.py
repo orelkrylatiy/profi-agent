@@ -1,0 +1,187 @@
+"""BrowserManager: жизненный цикл Chrome + CDP + feed page + health-check.
+
+Спека: разд. 5 (startup lifecycle), 6 (BrowserManager), 7 (session health-check).
+Chrome — внешний процесс, воркер только подключается по CDP и не убивает его
+при выходе. Автологина нет: если сессии нет — AUTH_REQUIRED и ждём человека.
+"""
+from __future__ import annotations
+
+import logging
+import subprocess
+import time
+from urllib.parse import urlparse
+
+from playwright.sync_api import Browser, BrowserContext, Page, sync_playwright
+
+import config
+
+log = logging.getLogger("profi.browser")
+
+# состояния воркера (спека разд. 7)
+READY = "READY"
+BROWSER_OFFLINE = "BROWSER_OFFLINE"
+AUTH_REQUIRED = "AUTH_REQUIRED"
+PROFI_UNAVAILABLE = "PROFI_UNAVAILABLE"
+
+
+def is_feed_url(url: str) -> bool:
+    """Feed page: host = profi.ru, path = /backoffice/n.php, без o=<id> в query."""
+    p = urlparse(url)
+    return (
+        p.scheme in ("http", "https")
+        and p.hostname is not None
+        and (p.hostname == config.FEED_HOST or p.hostname.endswith("." + config.FEED_HOST))
+        and p.path == config.FEED_PATH
+        and "o=" not in (p.query or "")
+    )
+
+
+class BrowserManager:
+    def __init__(self) -> None:
+        self._pw = None
+        self.browser: Browser | None = None
+        self.page: Page | None = None
+        self._chrome_proc: subprocess.Popen | None = None
+        self._login_hint_shown = False
+
+    # --- lifecycle ---
+
+    def start(self) -> str:
+        """INITIALIZING → CONNECT_CDP → FIND_FEED_PAGE → SESSION_CHECK. Возвращает READY/AUTH_REQUIRED/..."""
+        self._pw = sync_playwright().start()
+        self.browser = self._connect()
+        if self.browser is None:
+            self.browser = self._launch_and_connect()
+        if self.browser is None:
+            return BROWSER_OFFLINE
+
+        ctx = self._default_context()
+        page = self._find_feed_page(ctx)
+        if page is None:
+            page = ctx.new_page()
+            try:
+                page.goto(config.FEED_URL, wait_until="domcontentloaded", timeout=45_000)
+            except Exception as e:
+                log.warning("goto feed failed: %s", e)
+        self.page = page
+        return self.check_session()
+
+    def shutdown(self) -> None:
+        """Отключаемся от CDP; Chrome оставляем жить (сессия и телеметрия в нём)."""
+        for closer in (self._close_browser, self._pw.stop if self._pw else None):
+            try:
+                if callable(closer):
+                    closer()
+            except Exception:
+                pass
+        self.browser = None
+        self._pw = None
+
+    def _close_browser(self) -> None:
+        if self.browser is not None:
+            self.browser.close()
+
+    # --- CDP ---
+
+    def _cdp_url(self) -> str:
+        return f"http://127.0.0.1:{config.CDP_PORT}"
+
+    def _connect(self) -> Browser | None:
+        """Chrome уже запущен с нашим CDP-портом?"""
+        try:
+            browser = self._pw.chromium.connect_over_cdp(self._cdp_url(), timeout=3_000)
+            log.info("подключился к работающему Chrome по CDP :%s", config.CDP_PORT)
+            return browser
+        except Exception:
+            return None
+
+    def _launch_and_connect(self) -> Browser | None:
+        config.USER_DATA_DIR.mkdir(parents=True, exist_ok=True)
+        log.info("запускаю Chrome: user-data-dir=%s, CDP :%s", config.USER_DATA_DIR, config.CDP_PORT)
+        self._chrome_proc = subprocess.Popen(
+            [
+                config.CHROME_PATH,
+                f"--user-data-dir={config.USER_DATA_DIR}",
+                f"--remote-debugging-port={config.CDP_PORT}",
+                "--remote-allow-origins=*",
+                "--no-first-run",
+                "--no-default-browser-check",
+                "about:blank",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        deadline = time.monotonic() + 25.0
+        while time.monotonic() < deadline:
+            if self._chrome_proc.poll() is not None:
+                log.error(
+                    "Chrome завершился сразу. Вероятно, профиль %s уже открыт другим Chrome "
+                    "без CDP-порта — закрой это окно Chrome и запусти воркер снова.",
+                    config.USER_DATA_DIR,
+                )
+                return None
+            browser = self._connect()
+            if browser is not None:
+                return browser
+            time.sleep(0.7)
+        log.error("не смог подключиться к CDP :%s за 25 с", config.CDP_PORT)
+        return None
+
+    def _default_context(self) -> BrowserContext:
+        if self.browser.contexts:
+            return self.browser.contexts[0]
+        return self.browser.new_context()
+
+    # --- feed page discovery (спека разд. 6) ---
+
+    def _find_feed_page(self, ctx: BrowserContext) -> Page | None:
+        for page in ctx.pages:
+            try:
+                if is_feed_url(page.url):
+                    log.info("нашёл вкладку ленты: %s", page.url)
+                    return page
+            except Exception:
+                continue
+        return None
+
+    # --- session health-check (спека разд. 7) ---
+
+    def check_session(self) -> str:
+        """Дешёвая проверка без reload: страница жива и осталась на n.php.
+
+        Окончательное подтверждение сессии делает FeedCapture
+        (BoSearchBoardItems → 200 → data.boSearchBoardItems).
+        """
+        page = self.page
+        if self.browser is None or page is None or page.is_closed():
+            return BROWSER_OFFLINE
+        try:
+            url = page.url
+        except Exception as e:
+            log.warning("не смог прочитать url вкладки: %s", e)
+            return BROWSER_OFFLINE
+        if not is_feed_url(url):
+            # редирект на логин/авторизацию или уход со страницы ленты
+            if not self._login_hint_shown:
+                log.info("вкладка не на ленте (%s) — вероятно, нужна авторизация", url)
+                log.info(">>> Залогинься в Профи.ру в открывшемся Chrome — воркер подхватит сессию сам.")
+                self._login_hint_shown = True
+            return AUTH_REQUIRED
+        return READY
+
+    def ensure_ready(self) -> str:
+        """Перед каждым циклом: страница жива? закрыли — ищем/открываем заново."""
+        if self.browser is None:
+            return BROWSER_OFFLINE
+        page = self.page
+        if page is None or page.is_closed():
+            ctx = self._default_context()
+            page = self._find_feed_page(ctx)
+            if page is None:
+                page = ctx.new_page()
+                try:
+                    page.goto(config.FEED_URL, wait_until="domcontentloaded", timeout=45_000)
+                except Exception as e:
+                    log.warning("goto feed failed: %s", e)
+            self.page = page
+        return self.check_session()
