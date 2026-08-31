@@ -448,8 +448,9 @@ def run_autopilot() -> int:
     now = _dt.now()
     lock = config.DATA_DIR / "autopilot.lock"
     try:
-        # рабочие часы (P0-B BACKLOG): ночью отправки запрещены
-        if not (8 <= now.hour < 23):
+        # рабочие часы (config.WORK_HOURS, по умолчанию 8–23)
+        lo, hi = config.WORK_HOURS
+        if not (lo <= now.hour < hi):
             return 0
         if lock.exists():
             import time as _t
