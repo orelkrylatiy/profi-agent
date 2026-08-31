@@ -1,5 +1,7 @@
 #!/bin/zsh
-# Бесплатный диспетчер автопилота (системный cron, без LLM на холостом ходу)
+# Бесплатный диспетчер автопилота (launchd, без LLM на холостом ходу)
+# PATH обязателен: launchd не видит ~/.local/bin (инцидент 127, аудит 2026-08-31)
+export PATH="$HOME/.local/bin:/usr/local/bin:/opt/homebrew/bin:$PATH"
 cd /Users/m.s.agafonov/profi || exit 1
 [ -f data/autopilot.lock ] && exit 0
-uv run python main.py autopilot >> logs/autopilot.log 2>&1
+exec uv run python main.py autopilot >> logs/autopilot.log 2>&1

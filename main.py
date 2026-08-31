@@ -514,7 +514,7 @@ def run_autopilot() -> int:
                 send_failed = False
                 try:
                     try:
-                        result = run_respond(order_id, 2000, text, send=True)
+                        result = run_respond(order_id, config.RATE, text, send=True)
                         sent = result == 0
                     except OrderOpenError as e:
                         # карточка исчезла из ленты — заказ недоступен, не ретраим

@@ -1,52 +1,51 @@
 # Контур A — воркер откликов Профи.ру
 
-Читатель ленты + триаж + черновики; отправка всегда за человеком.
-Спека: vault `01 Projects/Репетиторство/Спека — Контур A (воркер откликов).md`.
+**АВТОРЕЖИМ (с 2026-08-31):** лента → фильтры → LLM-триаж и кастомный текст
+→ автоматическая отправка откликов с гейтами (лимит 3/день, потолок 500 ₽,
+позиция ≤ 20, рабочие часы 8–23). Ручная отправка тоже доступна (`respond`).
+Спека: vault `01 Projects/Репетиторство/Спека — Контур A (воркер откликов).md`,
+рабочая копия: `docs/SPEC.md`, правила: `RULES.md`.
 
-## Текущее состояние: milestone «читатель ленты»
+## Текущее состояние: M7 — автономный контур
 
-Chrome (выделенный профиль) → reload ленты → перехват `BoSearchBoardItems` →
-нормализация SNIPPET'ов → diff по `feed_seen` → hard-фильтры → лог.
-LLM-триаж, открытие заказов и черновики — следующие шаги.
+- воркер `main.py` (nohup, цикл 90–120 с) — лента/фильтры/кандидаты/детали;
+- диспетчер launchd `com.profi.autopilot` (каждые 120 с) → `main.py autopilot`
+  — жёсткие гейты → LLM (GLM-5.3) триаж+текст → отправка → `logs/autopilot.log`;
+- LLM-слой `llm.py` — мульти-провайдерный (glm / openai / anthropic-протокол),
+  настройка в `.env`.
 
 ## Настройка
 
 ```bash
 cd ~/profi
-uv sync                # создаёт .venv, ставит playwright
+uv sync
+cp .env.example .env   # вписать ключ (сейчас: Z.AI coding plan, GLM-5.3)
+uv run python main.py llm-check   # проверка: модель должна ответить
 ```
 
-Chrome скачивать не нужно: воркер использует системный Chrome с отдельным
-user-data-dir (`~/profi/chrome-profile`) и CDP-портом 9223.
+Chrome — системный, отдельный профиль `data/chrome-profiles/main`,
+CDD-порт **9333**, запуск `scripts/start-chrome.sh` (идемпотентен).
 
-## Первый запуск
-
-```bash
-uv run python main.py --once
-```
-
-Воркер запустит Chrome с чистым профилем и откроет ленту. Залогинься в
-Профи.ру в этом окне один раз — сессия живёт в профиле и переживает
-перезапуски. Повтори `--once` — должен появиться лог ленты.
-
-## Рабочий режим
+## Команды
 
 ```bash
-uv run python main.py            # луп: цикл каждые 90–120 с, ждёт логин сам
-```
-
-## Ручной гейт (после появления кандидатов)
-
-```bash
-uv run python main.py candidates
-uv run python main.py sent <order_id>
-uv run python main.py skip <order_id>
+uv run python main.py                  # рабочий цикл воркера (90–120 с)
+uv run python main.py --once           # один цикл
+uv run python main.py autopilot        # один проход автопилота вручную
+uv run python main.py llm-check        # живая проверка LLM
+uv run python main.py candidates       # список кандидатов со статусами
+uv run python main.py stats            # статистика откликов (v_responses)
+uv run python main.py fetch-details <id>   # дозагрузка карточки заказа
+uv run python main.py respond <id> --rate N --text '...' [--send]
+uv run python main.py note <id> --text '...'   # описание/резон в статистику
+uv run python main.py sent|skip <id>   # ручной гейт
 ```
 
 ## Где что лежит
 
-- `data/profi.db` — SQLite: `feed_seen` (фингерпринт) + `candidates`;
-- `logs/worker.log` — полный лог (DEBUG);
-- `logs/feed_diag/` — дампы неудачных захватов фида.
+- `data/profi.db` — SQLite: `feed_seen`, `candidates`, вьюшка `v_responses`;
+- `logs/worker.log` — воркер; `logs/autopilot.log` — решения автопилота;
+  `logs/launchd.log` — диспетчер; `logs/respond/` — скриншоты/JSON отправок;
+- `docs/` — SPEC (рабочая спека), JOURNAL (журнал экспериментов), BACKLOG.
 
-Настройки (порт, интервалы, фильтры) — `config.py`.
+Настройки: `config.py` (порт, интервалы, фильтры, лимиты, RATE).

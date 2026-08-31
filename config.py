@@ -47,6 +47,7 @@ REMOTE_ONLY = True        # geo.remote пуст → только очно → sk
 # --- Денежные предохранители (RULES.md §2; ревью P0-2) ---
 MAX_RESPONSE_PRICE_RUB = 500   # отклик дороже — отмена отправки
 DAILY_SEND_LIMIT = 3           # платных отправок за сутки максимум
+RATE = 2000                    # ставка ₽/час в форме отклика (RULES: менять здесь)
 
 LOG_LEVEL = os.environ.get("PROFI_LOG_LEVEL", "INFO")
 
