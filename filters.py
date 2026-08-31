@@ -40,8 +40,9 @@ def hard_filter(s: OrderSnippet) -> FilterVerdict:
     if config.REMOTE_ONLY and s.geo_remote is not None and not str(s.geo_remote).strip():
         return FilterVerdict(False, "только очно (geo.remote пуст)")
 
-    price_max = parse_price_max(s.price_raw)
-    if price_max is not None and price_max < config.MIN_RATE:
-        return FilterVerdict(False, f"бюджет {price_max} ₽ < порога {config.MIN_RATE} ₽")
+    if config.MIN_RATE is not None:
+        price_max = parse_price_max(s.price_raw)
+        if price_max is not None and price_max < config.MIN_RATE:
+            return FilterVerdict(False, f"бюджет {price_max} ₽ < порога {config.MIN_RATE} ₽")
 
     return FilterVerdict(True, "pass")
