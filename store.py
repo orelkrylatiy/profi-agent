@@ -147,12 +147,14 @@ class Store:
         self.conn.commit()
 
     def set_send_status(self, order_id: str, status: str) -> bool:
-        """Ручной гейт v1: sent / skipped (пишет только человек, через CLI)."""
+        """Гейт отправки: sent / skipped / unknown. sent и unknown — потраченные
+        отправки (unknown тоже списывает дневной лимит — P0-C)."""
+        now = int(time.time())
         cur = self.conn.execute(
             "UPDATE candidates SET send_status = ?, "
-            "sent_at = CASE WHEN ? = 'sent' THEN ? ELSE sent_at END, "
+            "sent_at = CASE WHEN ? IN ('sent','unknown') THEN ? ELSE sent_at END, "
             "updated_at = ? WHERE order_id = ?",
-            (status, status, int(time.time()), int(time.time()), order_id),
+            (status, status, now, now, order_id),
         )
         self.conn.commit()
         return cur.rowcount > 0
@@ -174,7 +176,8 @@ class Store:
             _dt.datetime.now().replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
         )
         row = self.conn.execute(
-            "SELECT COUNT(*) FROM candidates WHERE send_status='sent' AND sent_at >= ?",
+            "SELECT COUNT(*) FROM candidates WHERE send_status IN ('sent','unknown') "
+            "AND sent_at >= ?",
             (midnight,),
         ).fetchone()
         return int(row[0])

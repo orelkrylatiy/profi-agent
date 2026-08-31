@@ -157,10 +157,6 @@ def _chat_anthropic(system: str, user: str, temperature: float, max_tokens: int)
 def chat(system: str, user: str, temperature: float = 0.7, max_tokens: int = 900) -> str:
     """Один вызов выбранного провайдера. Исключение — при ошибке сети/API."""
     p = provider()
-    t0 = time.monotonic()
     if p == "anthropic":
-        out = _chat_anthropic(system, user, temperature, max_tokens)
-    else:  # glm, openai — OpenAI-совместимые
-        out = _chat_openai_style(system, user, temperature, max_tokens)
-    _last_latency_s = time.monotonic() - t0  # noqa: F841 — диагностика
-    return out
+        return _chat_anthropic(system, user, temperature, max_tokens)
+    return _chat_openai_style(system, user, temperature, max_tokens)  # glm, openai
