@@ -16,7 +16,9 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import random
+import subprocess
 import sys
 import time
 from datetime import datetime
@@ -357,6 +359,202 @@ def run_fetch_details(order_id: str) -> int:
         store.close()
 
 
+def _worker_running() -> bool:
+    try:
+        out = subprocess.run(["pgrep", "-f", r"main\.py$"], capture_output=True, text=True)
+        return bool(out.stdout.strip())
+    except Exception:
+        return False
+
+
+def _stop_worker() -> None:
+    subprocess.run(["pkill", "-f", r"main\.py$"], capture_output=True)
+    time.sleep(3)
+
+
+def _start_worker() -> None:
+    subprocess.Popen(
+        ["/bin/zsh", "-c",
+         "cd /Users/m.s.agafonov/profi && nohup uv run python main.py >> logs/worker.log 2>&1 &"],
+        start_new_session=True,
+    )
+
+
+TRIAGE_SYSTEM = (
+    "Ты — триажер заказов репетитора-программиста (информатика, ЕГЭ/ОГЭ, олимпиады, "
+    "программирование; дистанционно). Персона: преподаю информатику и программирование, "
+    "по основной работе — разработчик: алгоритмы и Python — ежедневная практика. "
+    "СТРОГО ЗАПРЕЩЕНО выдумывать опыт, достижения, участие в олимпиадах, отзывы. "
+    "Ответь СТРОГО JSON без обёрток: "
+    '{"verdict": "send"|"skip", "reason": "кратко, по-русски", '
+    '"text": "текст отклика клиенту, до 500 символов, только при verdict=send"}. '
+    "Текст: кастомный под заказ (имя ученика, класс, детали), честный, живой, "
+    "завершается вопросом клиенту, упоминает «дистанционно, 60–90 мин»."
+)
+
+
+def run_llm_check(model: str | None) -> int:
+    """Живая проверка LLM: провайдер, ключ (маскирован), тестовый вызов."""
+    import time as _t
+
+    import llm as llm_mod
+
+    if model:
+        os.environ["LLM_MODEL"] = model
+        llm_mod._ENV["LLM_MODEL"] = model
+    st = llm_mod.status()
+    print(f"провайдер: {st['provider']} | модель: {st['model']}")
+    print(f"endpoint:  {st['base']} | ключ {st['key_var']}: {st['key_masked'] or 'НЕ ЗАДАН'}")
+    if not st["key_masked"]:
+        print("ОШИБКА: ключ не задан — пропиши в ~/profi/.env")
+        return 1
+    t0 = _t.monotonic()
+    try:
+        answer = llm_mod.chat(
+            "Ты — проверка связи. Отвечай максимально коротко, без размышлений.",
+            "Ответь ровно одним словом: работает?",
+            max_tokens=300,
+            temperature=0.0,
+        )
+    except Exception as e:
+        print(f"ОШИБКА вызова: {e}")
+        return 1
+    dt = _t.monotonic() - t0
+    print(f"ответ ({dt:.1f} с): {answer.strip()[:120]}")
+    print("OK — модель отвечает")
+    return 0
+
+
+def run_autopilot() -> int:
+    """Автономный цикл: кандидаты → жёсткие проверки → LLM-триаж+текст → отправка.
+
+    Вызывается системным кроном (бесплатно). Без LLM_API_KEY и без кандидатов
+    завершается молча — ноль холостых расходов.
+    """
+    from datetime import datetime as _dt
+    import llm as llm_mod
+
+    now = _dt.now()
+    lock = config.DATA_DIR / "autopilot.lock"
+    try:
+        # рабочие часы (P0-B BACKLOG): ночью отправки запрещены
+        if not (8 <= now.hour < 23):
+            return 0
+        if lock.exists():
+            import time as _t
+
+            if _t.time() - lock.stat().st_mtime < 30 * 60:
+                return 0
+        lock.touch()
+
+        store = store_mod.Store(config.DB_PATH)
+        try:
+            rows = store.conn.execute(
+                "SELECT order_id, details_json FROM candidates "
+                "WHERE details_status='ready' AND send_status='not_sent' AND draft_status='pending'"
+            ).fetchall()
+            if not rows:
+                return 0
+            if not llm_mod.status()["key_masked"]:
+                log.info("autopilot: есть кандидаты (%d), но LLM-ключ не задан — пропускаю", len(rows))
+                return 0
+
+            for row in rows:
+                order_id = row["order_id"]
+                try:
+                    d = json.loads(row["details_json"] or "{}")
+                except Exception:
+                    d = {}
+                bid_price = int(d.get("bid_price") or 0)
+                position = d.get("competition_position")
+                # жёсткие проверки до LLM
+                if bid_price > config.MAX_RESPONSE_PRICE_RUB:
+                    store.set_send_status(order_id, "skipped")
+                    store.set_note(order_id, f"скип: цена отклика {bid_price} ₽ > {config.MAX_RESPONSE_PRICE_RUB}")
+                    continue
+                if position is not None and position > 20:
+                    store.set_send_status(order_id, "skipped")
+                    store.set_note(order_id, f"скип: позиция {position} > 20")
+                    continue
+                if d.get("has_bid"):
+                    store.set_send_status(order_id, "skipped")
+                    store.set_note(order_id, "скип: уже есть отклик")
+                    continue
+
+                # LLM-триаж + текст
+                user_prompt = json.dumps(d, ensure_ascii=False)[:6000]
+                try:
+                    # GLM-5.3 думающая: размышления съедают токены, даём запас
+                    raw = llm_mod.chat(TRIAGE_SYSTEM, user_prompt, temperature=0.7, max_tokens=3000)
+                    raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+                    verdict = json.loads(raw)
+                except Exception as e:
+                    log.error("autopilot: LLM/JSON ошибка по #%s: %s — пропускаю запуск", order_id, e)
+                    with open(config.LOG_DIR / "autopilot.log", "a", encoding="utf-8") as f:
+                        f.write(f"{now:%Y-%m-%d %H:%M} #{order_id} LLM_ERROR {e}\n")
+                    continue
+
+                reason = str(verdict.get("reason", ""))[:200]
+                if verdict.get("verdict") != "send":
+                    store.set_send_status(order_id, "skipped")
+                    store.set_note(order_id, f"скип LLM: {reason}")
+                    continue
+
+                text = str(verdict.get("text") or "")[:500].strip()
+                if len(text) < 100:
+                    store.set_send_status(order_id, "skipped")
+                    store.set_note(order_id, "скип: текст LLM слишком короткий")
+                    continue
+
+                # отправка: сериализация с мониторингом; ошибка одного
+                # заказа не убивает цикл (спека §28)
+                was_running = _worker_running()
+                if was_running:
+                    _stop_worker()
+                send_failed = False
+                try:
+                    try:
+                        result = run_respond(order_id, 2000, text, send=True)
+                        sent = result == 0
+                    except OrderOpenError as e:
+                        # карточка исчезла из ленты — заказ недоступен, не ретраим
+                        store.set_send_status(order_id, "skipped")
+                        store.set_note(order_id, f"скип: карточка недоступна — {e}")
+                        log.warning("#%s: %s", order_id, e)
+                        send_failed = True
+                        sent = None
+                    except Exception as e:
+                        log.error("autopilot: сбой отправки #%s: %s", order_id, e)
+                        store.conn.execute(
+                            "UPDATE candidates SET draft_status='error', last_error=?, updated_at=? "
+                            "WHERE order_id=?",
+                            (str(e)[:300], int(time.time()), order_id),
+                        )
+                        store.conn.commit()
+                        send_failed = True
+                        sent = None
+                finally:
+                    if was_running:
+                        _start_worker()
+                if send_failed:
+                    with open(config.LOG_DIR / "autopilot.log", "a", encoding="utf-8") as f:
+                        f.write(f"{now:%Y-%m-%d %H:%M} #{order_id} FAIL: см. worker.log\n")
+                    continue
+                store.set_note(order_id, f"{reason} | {bid_price} ₽ | поз {position} | отправлен={sent}")
+                with open(config.LOG_DIR / "autopilot.log", "a", encoding="utf-8") as f:
+                    f.write(f"{now:%Y-%m-%d %H:%M} #{order_id} send={'ok' if sent else 'fail'}: {reason}\n")
+                if not sent:
+                    continue  # кандидат выпал из очереди (draft=generated); идём дальше
+            return 0
+        finally:
+            store.close()
+    finally:
+        try:
+            lock.unlink()
+        except FileNotFoundError:
+            pass
+
+
 def run_cli(command: str, order_id: str | None, args_text: str | None = None) -> int:
     store = store_mod.Store(config.DB_PATH)
     try:
@@ -418,17 +616,17 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Контур A: воркер откликов Профи.ру")
     parser.add_argument(
         "command", nargs="?",
-        choices=["sent", "skip", "candidates", "fetch-details", "respond", "note", "stats"],
+        choices=["sent", "skip", "candidates", "fetch-details", "respond", "note", "stats",
+                 "autopilot", "llm-check"],
     )
     parser.add_argument("order_id", nargs="?")
     parser.add_argument("--once", action="store_true", help="один цикл вместо бесконечного лупа")
     parser.add_argument("--cycles", type=int, default=None, help="остановиться после N циклов")
     parser.add_argument("--rate", type=int, default=None, help="ставка ₽/час для формы отклика")
     parser.add_argument("--text", default=None, help="кастомный текст отклика (первый ответ клиенту)")
-    parser.add_argument(
-        "--send", action="store_true",
-        help="РЕАЛЬНО нажать «Откликнуться» (платно!); без флага — только заполнить форму",
-    )
+    parser.add_argument("--send", action="store_true",
+                        help="РЕАЛЬНО нажать «Откликнуться» (платно!); без флага — только заполнить форму")
+    parser.add_argument("--model", default=None, help="модель для llm-check (переопределяет LLM_MODEL)")
     args = parser.parse_args()
 
     setup_logging()
@@ -444,6 +642,10 @@ def main() -> int:
                 print("usage: main.py respond <order_id> --rate 2500 --text '...' [--send]")
                 return 2
             return run_respond(args.order_id, args.rate, args.text, send=args.send)
+        if args.command == "autopilot":
+            return run_autopilot()
+        if args.command == "llm-check":
+            return run_llm_check(args.model)
         return run_cli(args.command, args.order_id, args.text)
     if args.once:
         return run_once()
