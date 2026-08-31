@@ -93,6 +93,16 @@ def _model(p: str) -> str:
     }[p]
 
 
+def models_chain() -> list[str]:
+    """Цепочка моделей: основная (дешёвая) → фолбэк (LLM_FALLBACK_MODEL)."""
+    primary = _model(provider())
+    fb = _cfg("LLM_FALLBACK_MODEL")
+    chain = [primary]
+    if fb and fb != primary:
+        chain.append(fb)
+    return chain
+
+
 def _post(url: str, headers: dict, payload: dict) -> dict:
     req = urllib.request.Request(
         url, data=json.dumps(payload).encode("utf-8"), headers=headers, method="POST"
@@ -105,7 +115,7 @@ def _post(url: str, headers: dict, payload: dict) -> dict:
         raise RuntimeError(f"HTTP {e.code} от {url}: {body}") from e
 
 
-def _chat_openai_style(system: str, user: str, temperature: float, max_tokens: int) -> str:
+def _chat_openai_style(system: str, user: str, temperature: float, max_tokens: int, model: str) -> str:
     """OpenAI-совместимый протокол (glm, openai)."""
     key, _ = _key(provider())
     if not key:
@@ -114,7 +124,7 @@ def _chat_openai_style(system: str, user: str, temperature: float, max_tokens: i
         _base(provider()) + "/chat/completions",
         {"Content-Type": "application/json", "Authorization": f"Bearer {key}"},
         {
-            "model": _model(provider()),
+            "model": model,
             "messages": [
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
@@ -126,7 +136,7 @@ def _chat_openai_style(system: str, user: str, temperature: float, max_tokens: i
     return data["choices"][0]["message"]["content"]
 
 
-def _chat_anthropic(system: str, user: str, temperature: float, max_tokens: int) -> str:
+def _chat_anthropic(system: str, user: str, temperature: float, max_tokens: int, model: str) -> str:
     """Anthropic Messages API; совместимо и с прокси GLM (claude-buffet и др.)."""
     key, kname = _key("anthropic")
     if not key:
@@ -143,7 +153,7 @@ def _chat_anthropic(system: str, user: str, temperature: float, max_tokens: int)
         _base("anthropic") + "/v1/messages",
         headers,
         {
-            "model": _model("anthropic"),
+            "model": model,
             "system": system,
             "max_tokens": max_tokens,
             "temperature": temperature,
@@ -154,9 +164,11 @@ def _chat_anthropic(system: str, user: str, temperature: float, max_tokens: int)
     return "".join(parts)
 
 
-def chat(system: str, user: str, temperature: float = 0.7, max_tokens: int = 900) -> str:
+def chat(system: str, user: str, temperature: float = 0.7, max_tokens: int = 900,
+         model: str | None = None) -> str:
     """Один вызов выбранного провайдера. Исключение — при ошибке сети/API."""
     p = provider()
+    m = model or _model(p)
     if p == "anthropic":
-        return _chat_anthropic(system, user, temperature, max_tokens)
-    return _chat_openai_style(system, user, temperature, max_tokens)  # glm, openai
+        return _chat_anthropic(system, user, temperature, max_tokens, m)
+    return _chat_openai_style(system, user, temperature, max_tokens, m)  # glm, openai

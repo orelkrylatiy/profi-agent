@@ -493,19 +493,24 @@ def run_autopilot() -> int:
                     store.set_note(order_id, "скип: уже есть отклик")
                     continue
 
-                # LLM-триаж + текст (P1-E: ретрай при обрезанном JSON,
-                # две неудачи → draft_status=error, без вечного ретрая)
+                # LLM-триаж + текст. Цепочка попыток: основная (дешёвая)
+                # модель → она же с запасом токенов → фолбэк на основную
+                # модель (LLM_FALLBACK_MODEL). Две неудачи подряд → error.
                 user_prompt = json.dumps(d, ensure_ascii=False)[:6000]
                 verdict = None
                 last_err = None
-                for max_tok in (3000, 4500):
+                model_used = None
+                chain = llm_mod.models_chain()
+                plan = [(chain[0], 3000), (chain[0], 4500)] + [(m, 4500) for m in chain[1:]]
+                for m, tok in plan:
                     try:
                         raw = llm_mod.chat(
-                            TRIAGE_SYSTEM, user_prompt, temperature=0.4, max_tokens=max_tok
+                            TRIAGE_SYSTEM, user_prompt, temperature=0.4, max_tokens=tok, model=m
                         )
                         raw = raw.strip().removeprefix("```json").removeprefix("```") \
                             .removesuffix("```").strip()
                         verdict = json.loads(raw)
+                        model_used = m
                         break
                     except Exception as e:
                         last_err = e
@@ -582,7 +587,10 @@ def run_autopilot() -> int:
                     with open(config.LOG_DIR / "autopilot.log", "a", encoding="utf-8") as f:
                         f.write(f"{now:%Y-%m-%d %H:%M} #{order_id} FAIL: см. worker.log\n")
                     continue
-                store.set_note(order_id, f"{reason} | {bid_price} ₽ | поз {position} | отправлен={sent}")
+                store.set_note(
+                    order_id,
+                    f"{reason} | {bid_price} ₽ | поз {position} | модель {model_used} | отправлен={sent}",
+                )
                 if not sent:
                     # не тихая потеря: кандидат видим в stats как error
                     store.conn.execute(
