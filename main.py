@@ -357,7 +357,7 @@ def run_fetch_details(order_id: str) -> int:
         store.close()
 
 
-def run_cli(command: str, order_id: str | None) -> int:
+def run_cli(command: str, order_id: str | None, args_text: str | None = None) -> int:
     store = store_mod.Store(config.DB_PATH)
     try:
         if command == "candidates":
@@ -370,6 +370,34 @@ def run_cli(command: str, order_id: str | None) -> int:
                     f"#{r['order_id']} pr={r['priority']} det={r['details_status']} "
                     f"draft={r['draft_status']} send={r['send_status']} | {(r['title'] or '')[:50]}"
                 )
+            return 0
+        if command == "note":
+            if not order_id or not args_text:
+                print("укажи order_id и текст: main.py note <order_id> 'описание' (текст в --text)")
+                return 2
+            if store.set_note(order_id, args_text):
+                print(f"#{order_id} → описание записано")
+                return 0
+            print(f"кандидат #{order_id} не найден в БД")
+            return 1
+        if command == "stats":
+            rows = store.conn.execute(
+                "SELECT * FROM v_responses WHERE send_status IN ('sent','skipped','not_sent') "
+                "ORDER BY sent_at DESC NULLS LAST"
+            ).fetchall()
+            if not rows:
+                print("статистики пока нет")
+                return 0
+            sent = [r for r in rows if r["send_status"] == "sent"]
+            spent = sum(r["bid_price"] or 0 for r in sent)
+            print(f"{'заказ':<10} {'статус':<8} {'₽':<5} {'поз':<4} {'отправлен':<17} описание")
+            for r in rows:
+                print(
+                    f"#{r['order_id']:<9} {r['send_status']:<8} {r['bid_price'] or '-':<5} "
+                    f"{r['position'] or '-':<4} {(r['sent_at'] or '')[:16]:<17} "
+                    f"{(r['llm_summary'] or r['title'] or '')[:60]}"
+                )
+            print(f"\nитог: отправлено {len(sent)}, потрачено {spent} ₽")
             return 0
         if command in ("sent", "skip"):
             if not order_id:
@@ -389,7 +417,8 @@ def run_cli(command: str, order_id: str | None) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Контур A: воркер откликов Профи.ру")
     parser.add_argument(
-        "command", nargs="?", choices=["sent", "skip", "candidates", "fetch-details", "respond"]
+        "command", nargs="?",
+        choices=["sent", "skip", "candidates", "fetch-details", "respond", "note", "stats"],
     )
     parser.add_argument("order_id", nargs="?")
     parser.add_argument("--once", action="store_true", help="один цикл вместо бесконечного лупа")
@@ -415,7 +444,7 @@ def main() -> int:
                 print("usage: main.py respond <order_id> --rate 2500 --text '...' [--send]")
                 return 2
             return run_respond(args.order_id, args.rate, args.text, send=args.send)
-        return run_cli(args.command, args.order_id)
+        return run_cli(args.command, args.order_id, args.text)
     if args.once:
         return run_once()
     return run_loop(args.cycles)

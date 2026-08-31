@@ -42,6 +42,21 @@ CREATE TABLE IF NOT EXISTS candidates (
 
     last_error             TEXT
 );
+
+-- плоская статистика откликов поверх той же таблицы (вторая БД не нужна)
+CREATE VIEW IF NOT EXISTS v_responses AS
+SELECT
+    order_id,
+    title,
+    triage_reason                                     AS llm_summary,
+    send_status,
+    datetime(first_seen_at, 'unixepoch', 'localtime') AS first_seen,
+    datetime(sent_at, 'unixepoch', 'localtime')       AS sent_at,
+    CAST(json_extract(details_json, '$.bid_price') AS INTEGER) AS bid_price,
+    json_extract(details_json, '$.competition_position')       AS position,
+    length(draft_text)                                          AS text_len,
+    draft_text
+FROM candidates;
 """
 
 # feed_seen: NEW / UPDATED / UNCHANGED
@@ -138,6 +153,15 @@ class Store:
             "sent_at = CASE WHEN ? = 'sent' THEN ? ELSE sent_at END, "
             "updated_at = ? WHERE order_id = ?",
             (status, status, int(time.time()), int(time.time()), order_id),
+        )
+        self.conn.commit()
+        return cur.rowcount > 0
+
+    def set_note(self, order_id: str, note: str) -> bool:
+        """Краткое описание/резон решения от LLM (кладём в triage_reason)."""
+        cur = self.conn.execute(
+            "UPDATE candidates SET triage_reason = ?, updated_at = ? WHERE order_id = ?",
+            (note, int(time.time()), order_id),
         )
         self.conn.commit()
         return cur.rowcount > 0
