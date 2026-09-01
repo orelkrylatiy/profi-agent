@@ -43,6 +43,15 @@ CREATE TABLE IF NOT EXISTS candidates (
     last_error             TEXT
 );
 
+CREATE TABLE IF NOT EXISTS chat_log (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    order_id     TEXT,
+    client_name  TEXT,
+    sender       TEXT NOT NULL,          -- client / tutor / system
+    text         TEXT,
+    created_at   INTEGER NOT NULL
+);
+
 -- плоская статистика откликов поверх той же таблицы (вторая БД не нужна)
 CREATE VIEW IF NOT EXISTS v_responses AS
 SELECT
@@ -158,6 +167,21 @@ class Store:
         )
         self.conn.commit()
         return cur.rowcount > 0
+
+    def log_chat(self, order_id: str | None, client_name: str, sender: str, text: str) -> None:
+        self.conn.execute(
+            "INSERT INTO chat_log (order_id, client_name, sender, text, created_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (order_id, client_name, sender, text, int(time.time())),
+        )
+        self.conn.commit()
+
+    def last_chat_sent_at(self, order_id: str) -> int | None:
+        row = self.conn.execute(
+            "SELECT MAX(created_at) FROM chat_log WHERE order_id = ? AND sender = 'tutor'",
+            (order_id,),
+        ).fetchone()
+        return row[0] if row and row[0] else None
 
     def set_note(self, order_id: str, note: str) -> bool:
         """Краткое описание/резон решения от LLM (кладём в triage_reason)."""
