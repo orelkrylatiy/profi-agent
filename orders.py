@@ -57,6 +57,14 @@ def open_candidate(ctx: BrowserContext, feed_page: Page, order_id: str) -> tuple
     try:
         card = feed_page.get_by_test_id(f"{order_id}_order-snippet")
         if card.count() == 0:
+            # DOM мог стухнуть/уехать — один рефётч ленты и повторный поиск
+            try:
+                feed_page.reload(wait_until="domcontentloaded", timeout=45_000)
+                feed_page.wait_for_timeout(2_500)
+            except Exception:
+                pass
+            card = feed_page.get_by_test_id(f"{order_id}_order-snippet")
+        if card.count() == 0:
             raise OrderOpenError(f"карточка #{order_id} не найдена в ленте (data-testid)")
         card.scroll_into_view_if_needed(timeout=10_000)
         human_pause()

@@ -139,7 +139,8 @@ class BrowserManager:
     def _find_feed_page(self, ctx: BrowserContext) -> Page | None:
         for page in ctx.pages:
             try:
-                if is_feed_url(page.url):
+                # вкладка с ?o= — открытый заказ, не лента (само-лечение после навигации)
+                if is_feed_url(page.url) and "o=" not in page.url.split("?", 1)[-1]:
                     log.info("нашёл вкладку ленты: %s", page.url)
                     return page
             except Exception:

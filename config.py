@@ -11,7 +11,14 @@ from pathlib import Path
 PROJECT_DIR = Path(__file__).resolve().parent
 DATA_DIR = PROJECT_DIR / "data"
 LOG_DIR = PROJECT_DIR / "logs"
-DB_PATH = DATA_DIR / "profi.db"
+DB_PATH = Path(os.environ.get("PROFI_DB", str(DATA_DIR / "profi.db")))
+
+# --- Персона (промпт) и фильтры: один аккаунт = одна персона ---
+PERSONA = os.environ.get("PROFI_PERSONA", "info")
+PERSONA_DIR = PROJECT_DIR / "personas"
+SUBJECT_KEYWORDS = [s.strip() for s in os.environ.get(
+    "PROFI_SUBJECTS", "информатик,программирован"
+).split(",") if s.strip()]
 
 # --- Chrome (правило: один аккаунт = один user-data-dir, свой CDP-порт) ---
 CHROME_PATH = os.environ.get(
@@ -38,8 +45,7 @@ AUTH_WAIT_S = 30         # период проверки, пока ждём ру
 AUTH_COOLDOWN_S = 30 * 60  # пауза после 401/403
 
 # --- Hard filters (до LLM). Настройки под цель: ЕГЭ/ОГЭ информатика, дистанционно ---
-# Подстроки в title+description (без учёта регистра).
-SUBJECT_KEYWORDS = ["информатик", "программирован"]
+# Подстроки в title+description (без учёта регистра); переопределяется PROFI_SUBJECTS
 MIN_RATE = None          # 2026-08-31: фильтр по цене ВЫКЛЮЧЕН владельцем (вход на площадку, берём любые бюджеты)
 VACANCY_PATTERNS = ["ваканс"]
 REMOTE_ONLY = True        # geo.remote пуст → только очно → skip
