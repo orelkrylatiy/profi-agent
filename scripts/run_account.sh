@@ -1,5 +1,6 @@
 #!/bin/bash
 # run_account.sh <account> — универсальный запускатор одного аккаунта.
+export PATH=/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 # Аккаунт = файл accounts/<name>.env (PERSONA, SUBJECTS, CDP_PORT, PROFILE[, READY-флаг]).
 # БД по умолчанию: data/<name>.db. Новый акк = новый .env файл, ноль правок кода.
 set -u
@@ -9,6 +10,7 @@ ENVF="$BASE/accounts/$ACC.env"
 [ -f "$ENVF" ] || { echo "нет аккаунта: $ENVF" >&2; exit 1; }
 set -a; . "$ENVF"; set +a
 export PROFI_DB="${PROFI_DB:-$BASE/data/$ACC.db}"
+export PROFI_CHROME_PATH="${PROFI_CHROME_PATH:-/root/profi-agent/scripts/chrome-vps.sh}"
 export PROFI_RHYTHM_TAG="$ACC"
 export PROFI_PERSONA="${PROFI_PERSONA:-$ACC}"
 cd "$BASE" || exit 1
