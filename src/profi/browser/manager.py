@@ -25,6 +25,19 @@ AUTH_REQUIRED = "AUTH_REQUIRED"
 PROFI_UNAVAILABLE = "PROFI_UNAVAILABLE"
 
 
+def is_order_tab(url: str) -> bool:
+    """n.php?o=<id> — вкладка карточки заказа. Открывается ТОЛЬКО нашей
+    автоматикой (popup или прямой URL в open_candidate) и закрывается там же;
+    зависшая = утечка после падения/OOM-килла."""
+    p = urlparse(url)
+    return (
+        p.hostname is not None
+        and (p.hostname == config.FEED_HOST or p.hostname.endswith("." + config.FEED_HOST))
+        and p.path == config.FEED_PATH
+        and "o" in parse_qs(p.query)
+    )
+
+
 def is_feed_url(url: str) -> bool:
     """Feed page: host = profi.ru, path = /backoffice/n.php, без параметра o=<id>.
 
@@ -186,10 +199,46 @@ class BrowserManager:
             return AUTH_REQUIRED
         return READY
 
+    def close_stray_tabs(self) -> list[str]:
+        """Гигиена вкладок (анти-утечка памяти, VPS 1.6 ГБ).
+
+        Наша автоматика держит РОВНО ОДНУ вкладку ленты; карточки заказов
+        (n.php?o=) — всплывающие и закрываются сразу. Зависшие дубли ленты и
+        карточки — от прошлых падений/OOM-киллов, их нельзя поймать в коде,
+        поэтому подчищаем перед каждым циклом. Чужие вкладки (чаты r.php,
+        newtab) НЕ трогаем: r.php бывает открыт chat-пробником прямо сейчас.
+        """
+        closed: list[str] = []
+        try:
+            ctx = self._default_context()
+        except Exception:
+            return closed
+        feed_kept = False
+        for pg in list(ctx.pages):
+            try:
+                url = pg.url
+                if is_feed_url(url):
+                    if feed_kept:
+                        closed.append(url)
+                        pg.close(run_before_unload=False)
+                    else:
+                        feed_kept = True
+                elif is_order_tab(url):
+                    closed.append(url)
+                    pg.close(run_before_unload=False)
+            except Exception:
+                continue
+        if closed:
+            log.warning(
+                "гигиена вкладок: закрыто %d зависших: %s", len(closed), [u[:70] for u in closed]
+            )
+        return closed
+
     def ensure_ready(self) -> str:
-        """Перед каждым циклом: страница жива? закрыли — ищем/открываем заново."""
+        """Перед каждым циклом: гигиена вкладок + страница жива?"""
         if self.browser is None:
             return BROWSER_OFFLINE
+        self.close_stray_tabs()
         page = self.page
         if page is None or page.is_closed():
             ctx = self._default_context()

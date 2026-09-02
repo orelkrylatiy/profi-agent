@@ -114,8 +114,15 @@ def main() -> int:
                 }
             )
         finally:
-            page.close()
-            pw.stop()
+            # раздельные try: неудачное close не должно оставлять playwright живым
+            try:
+                page.close()
+            except Exception:
+                pass
+            try:
+                pw.stop()
+            except Exception:
+                pass
     except Exception as e:
         out({"ok": False, "error": str(e)[:120]})
     return 0

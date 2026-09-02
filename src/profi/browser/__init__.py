@@ -7,6 +7,7 @@ from profi.browser.manager import (
     READY,
     BrowserManager,
     is_feed_url,
+    is_order_tab,
 )
 
 __all__ = [
@@ -16,4 +17,5 @@ __all__ = [
     "PROFI_UNAVAILABLE",
     "READY",
     "is_feed_url",
+    "is_order_tab",
 ]

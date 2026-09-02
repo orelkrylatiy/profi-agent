@@ -99,6 +99,15 @@ def open_candidate(
         while time.monotonic() < deadline and not captured:
             order_page.wait_for_timeout(250)
         order_page.wait_for_timeout(1500)
+    except Exception:
+        # вкладку открыли мы (popup/прямой URL): ошибка валидации не должна
+        # оставлять её открытой (утечка памяти; 2026-09-03: 4 зависших
+        # карточки заказа в живом Chrome). Закрываем и пробрасываем.
+        try:
+            order_page.close(run_before_unload=False)
+        except Exception:
+            pass
+        raise
     finally:
         try:
             ctx.remove_listener("response", on_response)
