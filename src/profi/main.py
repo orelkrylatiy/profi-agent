@@ -453,6 +453,45 @@ def _style_variation() -> str:
     return "Вариация этого сообщения: " + "; ".join(hints) + ". "
 
 
+def _client_summary(block: dict | None) -> str | None:
+    """Клиент одной строкой для промпта: имя, стаж, подтверждённость."""
+    if not block:
+        return None
+    parts = []
+    if block.get("name"):
+        parts.append(f"имя {block['name']}")
+    if block.get("profile_since"):
+        parts.append(f"на Профи с {block['profile_since']}")
+    if block.get("phone_verified"):
+        parts.append("телефон подтверждён")
+    if block.get("reviews"):
+        parts.append(f"отзывов: {block['reviews']}")
+    return "; ".join(parts) or None
+
+
+def _llm_order_payload(d: dict) -> str:
+    """Компактный слепок карточки для LLM (JSON, без мусора).
+
+    Сырой details_json содержит price_hash/form_elements/raw_bo_order_screen —
+    на живой карточке они съедали лимит 6000 символов и выталкивали
+    competition_position и client_block_dom за срез.
+    """
+    keep = {
+        "id": d.get("id"),
+        "subject": d.get("subject"),
+        "description": d.get("description"),
+        "student": d.get("student"),
+        "wishes": d.get("wishes"),
+        "remote": d.get("remote"),
+        "address": d.get("address"),
+        "client": _client_summary(d.get("client_block_dom")),
+        "bid_price": d.get("bid_price"),
+        "has_bid": d.get("has_bid"),
+        "competition_position": d.get("competition_position"),
+    }
+    return json.dumps(keep, ensure_ascii=False)
+
+
 def _first_word(s: str) -> str:
     return s.split()[0].lower().strip(",") if s.strip() else ""
 
@@ -743,9 +782,7 @@ def run_autopilot() -> int:
                 # LLM-триаж + текст. Цепочка попыток: основная (дешёвая)
                 # модель → она же с запасом токенов → фолбэк на основную
                 # модель (LLM_FALLBACK_MODEL). Две неудачи подряд → error.
-                user_prompt = (
-                    json.dumps(d, ensure_ascii=False)[:6000] + "\n\n" + _recipient_hint(d)
-                )
+                user_prompt = _llm_order_payload(d) + "\n\n" + _recipient_hint(d)
                 verdict = None
                 last_err = None
                 model_used = None
