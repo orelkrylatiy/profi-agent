@@ -1,4 +1,5 @@
 """Рабочие часы: единый гейт автономных контуров (RULES 8–23)."""
+
 from datetime import datetime
 
 from profi import config
