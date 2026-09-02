@@ -21,8 +21,7 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-import config  # noqa: E402
+from profi import config
 
 STATE = Path(config.DATA_DIR if hasattr(config, "DATA_DIR") else Path(__file__).resolve().parent.parent / "data") / "chats_state.json"
 

@@ -10,8 +10,7 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-import config  # noqa: E402
+from profi import config
 
 CDP = f"http://127.0.0.1:{config.CDP_PORT}"
 OUT = config.LOG_DIR / "chats"

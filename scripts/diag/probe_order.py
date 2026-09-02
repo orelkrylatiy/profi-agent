@@ -15,9 +15,13 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-import config  # noqa: E402
-from orders import OrderOpenError, extract_dom_texts, open_candidate, parse_competition_position  # noqa: E402
+from profi import config
+from profi.integration.orders import (
+    OrderOpenError,
+    extract_dom_texts,
+    open_candidate,
+    parse_competition_position,
+)
 
 CDP = f"http://127.0.0.1:{config.CDP_PORT}"
 OUT = config.LOG_DIR / "m2"

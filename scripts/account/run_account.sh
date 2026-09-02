@@ -10,14 +10,14 @@ ENVF="$BASE/accounts/$ACC.env"
 [ -f "$ENVF" ] || { echo "нет аккаунта: $ENVF" >&2; exit 1; }
 set -a; . "$ENVF"; set +a
 export PROFI_DB="${PROFI_DB:-$BASE/data/$ACC.db}"
-export PROFI_CHROME_PATH="${PROFI_CHROME_PATH:-/root/profi-agent/scripts/chrome-vps.sh}"
+export PROFI_CHROME_PATH="${PROFI_CHROME_PATH:-$BASE/scripts/browser/chrome-vps.sh}"
 export PROFI_RHYTHM_TAG="$ACC"
 export PROFI_PERSONA="${PROFI_PERSONA:-$ACC}"
 cd "$BASE" || exit 1
 
 # браузер (если порт мёртв) — generic лаунчер
 curl -s -m 3 "http://127.0.0.1:${PROFI_CDP_PORT}/json/version" >/dev/null 2>&1 || \
-  setsid "$BASE/scripts/launch_account_browser.sh" "$ACC" </dev/null >> "logs/browser-$ACC.log" 2>&1 &
+  setsid "$BASE/scripts/browser/launch_account_browser.sh" "$ACC" </dev/null >> "logs/browser-$ACC.log" 2>&1 &
 
 # воркер — только если акк залогинен (флаг accounts/<acc>.ready)
 if [ -f "accounts/$ACC.ready" ]; then

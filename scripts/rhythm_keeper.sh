@@ -29,7 +29,7 @@ fi
 
 # вне паузы: гарантируем живость всех акков
 for ENVF in "$BASE"/accounts/*.env; do
-  bash "$BASE/scripts/run_account.sh" "$(basename "$ENVF" .env)"
+  bash "$BASE/scripts/account/run_account.sh" "$(basename "$ENVF" .env)"
 done
 [ "$PAUSED_UNTIL" -gt 0 ] && PAUSED_UNTIL=0
 

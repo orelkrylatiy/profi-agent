@@ -15,13 +15,13 @@ LLM-триаж и кастомный текст отклика → отправ�
 cd /root/profi-agent
 uv sync
 cp .env.example .env        # ZAI_API_KEY, GLM_BASE_URL, LLM_MODEL
-uv run python main.py llm-check   # проверка LLM
+uv run python -m profi llm-check   # проверка LLM
 
-# поднять аккаунт (браузер + воркер, идемпотентно):
-bash scripts/run_lang.sh            # акк lang (Валерия, англ+исп, CDP :9224, data/lang.db)
-bash scripts/run_info.sh            # акк info (информатика, CDP :9223, data/profi.db)
-bash scripts/fix_lang_browser.sh    # починить зависший браузер lang
-bash scripts/fix_info_worker.sh     # поднять info-воркер
+# поднять аккаунт (браузер + воркер, идемпотентно) — generic, по accounts/<acc>.env:
+bash scripts/account/run_account.sh lang    # акк lang (Валерия, англ+исп, CDP :9224, data/lang.db)
+bash scripts/account/run_account.sh info    # акк info (информатика, CDP :9223, data/profi.db)
+bash scripts/browser/fix_browser.sh lang    # починить зависший браузер lang
+bash scripts/account/fix_worker.sh info     # перезапустить info-воркер
 ```
 
 ## Крон (пользователь root)
@@ -37,26 +37,33 @@ bash scripts/fix_info_worker.sh     # поднять info-воркер
 ## Структура
 
 ```
-main.py       — CLI: цикл воркера, autopilot, respond, llm-check, candidates, stats
-browser.py    — Chrome over CDP (коннект к живому или launch), логин-стена
-feed.py       — чтение ленты через перехват BoSearchBoardItems (пассивно)
-filters.py    — hard-фильтры (предметы, дистанционка)
-orders.py     — карточки заказов, тарифы, детали
-respond.py    — заполнение формы отклика ЧЕЛОВЕЧЕСКИМИ инпутами (RULES §1)
-llm.py        — мульти-провайдерный LLM (glm/openai/anthropic), ключи в .env
-store.py      — SQLite: feed_seen, candidates, v_responses
-config.py     — все настройки + env-переопределения
-personas/     — промпты персон (info.md, lang.md)
-accounts/     — <acc>.env (персона, порт, профиль, субъекты) + <acc>.ready
-scripts/      — запуск/починка браузеров и воркеров, rhythm_keeper
-data/         — <acc>.db (SQLite), rhythm_state.json, chats_state.json
-logs/         — worker-<acc>.log, autopilot.log, rhythm.log, respond/ (скриншоты)
+src/profi/          — пакет (ставится через uv sync, editable):
+  main.py           — CLI и оркестрация: цикл воркера, autopilot, chats/chat-auto
+  config.py         — все настройки + env-переопределения (якорь: PROJECT_DIR = корень репо)
+  filters.py        — hard-фильтры (предметы, дистанционка)
+  browser/          — Chrome over CDP: manager (коннект к живому или launch), логин-стена
+  integration/      — Профи.ру: feed (перехват BoSearchBoardItems), orders (карточки),
+                      respond (форма ЧЕЛОВЕЧЕСКИМИ инпутами, RULES §1), chat (чаты)
+  storage/          — SQLite: feed_seen, candidates, chat_log, v_responses
+  llm/              — мульти-провайдерный LLM (glm/openai/anthropic), ключи в .env
+  models/           — OrderSnippet, FeedSnapshot, FilterVerdict
+  utils/            — human_pause (человеческий темп), textguard (анти-инъекция)
+personas/           — промпты персон (info.md, lang.md)
+accounts/           — <acc>.env (персона, порт, профиль, субъекты) + <acc>.ready
+scripts/            — точки входа планировщиков: rhythm_keeper.sh (VPS cron),
+                      autopilot_cron.sh (Mac launchd)
+  account/          — run_account.sh <acc>, fix_worker.sh <acc>
+  browser/          — start-chrome.sh (Mac), chrome-vps.sh, launch_account_browser.sh,
+                      fix_browser.sh <acc>
+  diag/             — read-only пробники: diag_feed2, probe_order/form/chat, chats_unread
+data/               — <acc>.db (SQLite), browser-profiles/<acc>, rhythm_state.json
+logs/               — worker-<acc>.log, autopilot.log, rhythm.log, respond/ (скриншоты)
 ```
 
 ## Ключевые env (в accounts/<acc>.env и .env)
 
 - `PROFI_PERSONA`, `PROFI_SUBJECTS`, `PROFI_CDP_PORT`, `PROFI_CHROME_PROFILE`, `PROFI_DB`
-- `PROFI_CHROME_PATH` — путь к chrome-бинарю (на VPS — `scripts/chrome-vps.sh`);
+- `PROFI_CHROME_PATH` — путь к chrome-бинарю (на VPS — `scripts/browser/chrome-vps.sh`);
   дефолт в config.py — мак-путь, на VPS ОБЯЗАТЕЛЬНО переопределять
 - `PROFI_RESPOND_MODE` — тариф отклика: `pay` (платный, дефолт) | `commission`
   (через комиссию Profi; если тариф недоступен аккаунту — отправка отменяется)

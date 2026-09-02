@@ -25,7 +25,8 @@ PROFILE="${1:-main}"
 PORT="${2:-9333}"
 
 CHROME="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
-PROFILES_DIR="$HOME/profi/data/chrome-profiles"
+BASE="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+PROFILES_DIR="$BASE/data/chrome-profiles"
 PROFILE_DIR="$PROFILES_DIR/$PROFILE"
 START_URL="https://profi.ru/backoffice/n.php"
 
