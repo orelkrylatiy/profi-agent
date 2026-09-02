@@ -38,7 +38,8 @@ bash scripts/account/fix_worker.sh info     # перезапустить info-в
 
 ```
 src/profi/          — пакет (ставится через uv sync, editable):
-  main.py           — CLI и оркестрация: цикл воркера, autopilot, chats/chat-auto
+  main.py           — CLI и оркестрация: цикл воркера (лента + чат-чек каждый
+                      CHAT_CHECK_EVERY_CYCLES-й цикл), autopilot, chats/chat-auto
   config.py         — все настройки + env-переопределения (якорь: PROJECT_DIR = корень репо)
   filters.py        — hard-фильтры (предметы, дистанционка)
   browser/          — Chrome over CDP: manager (коннект к живому или launch), логин-стена
@@ -52,7 +53,8 @@ personas/           — промпты персон (info.md, lang.md)
 accounts/           — <acc>.env (персона, порт, профиль, субъекты) + <acc>.ready
 scripts/            — точки входа планировщиков: rhythm_keeper.sh (VPS cron),
                       autopilot_cron.sh (Mac launchd), chat_cron.sh (Mac launchd
-                      com.profi.chats, 4 мин: chats_unread.py → chat-auto)
+                      com.profi.chats, 4 мин: chats_unread.py → chat-auto —
+                      ЗАПАСНОЙ путь, основной это чат-чек в цикле воркера)
   account/          — run_account.sh <acc>, fix_worker.sh <acc>
   browser/          — start-chrome.sh (Mac), chrome-vps.sh, launch_account_browser.sh,
                       fix_browser.sh <acc>
@@ -64,6 +66,7 @@ logs/               — worker-<acc>.log, autopilot.log, rhythm.log, respond/ (�
 ## Ключевые env (в accounts/<acc>.env и .env)
 
 - `PROFI_PERSONA`, `PROFI_SUBJECTS`, `PROFI_CDP_PORT`, `PROFI_CHROME_PROFILE`, `PROFI_DB`
+- `PROFI_CHAT_EVERY` — чат-чек каждый N-й цикл воркера (дефолт 3 ≈ раз в 4.5–6 мин)
 - `PROFI_CHROME_PATH` — путь к chrome-бинарю (на VPS — `scripts/browser/chrome-vps.sh`);
   дефолт в config.py — мак-путь, на VPS ОБЯЗАТЕЛЬНО переопределять
 - `PROFI_RESPOND_MODE` — тариф отклика: `pay` (платный, дефолт) | `commission`

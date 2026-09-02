@@ -1,17 +1,25 @@
-# Контур A — воркер откликов Профи.ру
+# Контур A — воркер откликов Профи.ру (+ Контур B light: автоответы в чатах)
 
 **АВТОРЕЖИМ (с 2026-08-31):** лента → фильтры → LLM-триаж и кастомный текст
 → автоматическая отправка откликов с гейтами (лимит 3/день, потолок 500 ₽,
 позиция ≤ 20, рабочие часы 8–23). Ручная отправка тоже доступна (`respond`).
+**Чаты (с 2026-09-02):** воркер сам отвечает клиентам через LLM — каждый
+N-й цикл (`PROFI_CHAT_EVERY`, дефолт 3 ≈ раз в 4.5–6 мин). Гейты:
+`autopilot.lock` (не пересекается с платной отправкой), ≤2 ответов за
+запуск, ≥30 мин на диалог, needs_human → владельцу, анти-инъекция
+(в тексте для клиента запрещены ссылки/телефоны).
 Спека: vault `01 Projects/Репетиторство/Спека — Контур A (воркер откликов).md`,
 рабочая копия: `docs/SPEC.md`, правила: `RULES.md`.
 
 ## Текущее состояние: M7 — автономный контур
 
 - воркер `src/profi/main.py` (nohup, цикл 90–120 с, запуск `uv run python -m profi`)
-  — лента/фильтры/кандидаты/детали;
+  — лента/фильтры/кандидаты/детали **+ чат-чек каждый N-й цикл**;
 - диспетчер launchd `com.profi.autopilot` (каждые 120 с) → `main.py autopilot`
   — жёсткие гейты → LLM (GLM-5.3) триаж+текст → отправка → `logs/autopilot.log`;
+- диспетчер launchd `com.profi.chats` (каждые 240 с) → `chats_unread.py`
+  (дешёвый пробник, 0 токенов) → `chat-auto` — **запасной** путь чатов,
+  когда воркер не запущен; сам поднимает Chrome, если CDP мёртв;
 - LLM-слой `src/profi/llm/` — мульти-провайдерный (glm / openai / anthropic-протокол),
   настройка в `.env`.
 
@@ -41,6 +49,8 @@ uv run python -m profi fetch-details <id>   # дозагрузка карточ�
 uv run python -m profi respond <id> --rate N --text '...' [--send]
 uv run python -m profi note <id> --text '...'   # описание/резон в статистику
 uv run python -m profi sent|skip <id>   # ручной гейт
+uv run python -m profi chats            # список чатов (read-only)
+uv run python -m profi chat-auto        # ответить в чатах сейчас (вне цикла)
 uv run pytest                           # тесты чистой логики
 ```
 
@@ -49,12 +59,15 @@ uv run pytest                           # тесты чистой логики
 - `src/profi/` — пакет: `main` (CLI/оркестрация), `browser` (Chrome/CDP),
   `integration` (лента/карточки/отклики/чаты), `llm`, `storage` (SQLite),
   `models`, `utils`, `config`;
-- `data/profi.db` — SQLite: `feed_seen`, `candidates`, вьюшка `v_responses`;
-  `data/browser-profiles/` — профили Chrome (сессии);
+- `data/profi.db` — SQLite: `feed_seen`, `candidates`, `chat_log`,
+  вьюшка `v_responses`; `data/browser-profiles/` — профили Chrome (сессии);
 - `logs/worker.log` — воркер; `logs/autopilot.log` — решения автопилота;
-  `logs/launchd.log` — диспетчер; `logs/respond/` — скриншоты/JSON отправок;
+  `logs/chats_cron.log` — чат-дозор; `logs/launchd.log` — диспетчер;
+  `logs/respond/` и `logs/chats/` — скриншоты отправок;
 - `docs/` — SPEC (рабочая спека), JOURNAL (журнал экспериментов), BACKLOG;
 - `scripts/` — `rhythm_keeper.sh`/`autopilot_cron.sh` (точки входа кронов),
   `account/` (воркеры), `browser/` (Chrome), `diag/` (пробники).
 
-Настройки: `src/profi/config.py` (порт, интервалы, фильтры, лимиты, RATE).
+Настройки: `src/profi/config.py` (гейты, ритм, лимиты, RATE) + `.env`
+(шаблон `.env.example`: LLM-ключи и все `PROFI_*` — аккаунт, порт, предметы,
+`PROFI_CHAT_EVERY`; окружение процесса старше `.env`).
