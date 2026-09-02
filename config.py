@@ -25,9 +25,13 @@ CHROME_PATH = os.environ.get(
     "PROFI_CHROME_PATH",
     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
 )
-USER_DATA_DIR = Path(
-    os.environ.get("PROFI_CHROME_PROFILE", str(PROJECT_DIR / "data" / "chrome-profiles" / "main"))
-)
+# Профили браузеров живут внутри проекта (data/browser-profiles/<акк>);
+# относительный PROFI_CHROME_PROFILE из accounts/<acc>.env считается от
+# PROJECT_DIR, чтобы env-файлы не зависели от расположения проекта.
+_profile = os.environ.get("PROFI_CHROME_PROFILE")
+USER_DATA_DIR = Path(_profile) if _profile else PROJECT_DIR / "data" / "chrome-profiles" / "main"
+if not USER_DATA_DIR.is_absolute():
+    USER_DATA_DIR = PROJECT_DIR / USER_DATA_DIR
 CDP_PORT = int(os.environ.get("PROFI_CDP_PORT", "9333"))
 
 FEED_URL = "https://profi.ru/backoffice/n.php"

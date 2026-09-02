@@ -10,7 +10,7 @@ cat > /root/profi-autopilot2-cron.sh << 'EOF'
 export PATH=/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 export PROFI_PERSONA=lang
 export PROFI_DB=/root/profi-agent/data/lang.db
-export PROFI_CHROME_PROFILE=/root/browser-profiles/profi2
+export PROFI_CHROME_PROFILE=/root/profi-agent/data/browser-profiles/profi2
 export PROFI_CDP_PORT=9224
 export PROFI_SUBJECTS="английск,испанск,english,spanish,eng,исп"
 cd /root/profi-agent
