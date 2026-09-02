@@ -27,6 +27,14 @@ TARIFFS_BLOCK_TESTID = "orderCard/tariffs"
 BID_WINDOW_TESTID = "bid_window_container"
 PAY_BUTTON_TESTID = "payment_methods_form_pay_button"
 COMMISSION_RE = re.compile("комисси", re.IGNORECASE)
+# страница после клика показывает это при отказе RPC (инцидент #92799459, rpc 400)
+SEND_ERROR_MARKER = "произошла ошибка"
+
+
+def send_failed(outcome: dict) -> bool:
+    """True, если после клика «Откликнуться» площадка показала ошибку."""
+    tail = (outcome.get("page_text_tail") or "").lower()
+    return SEND_ERROR_MARKER in tail
 
 
 class RespondError(Exception):
@@ -131,9 +139,17 @@ def open_respond_form(
     return order_page
 
 
-def _type_human(page: Page, locator, text: str) -> None:
-    """Посимвольный ввод чанками по 3–9 символов, паузы 0.15–0.6 с (RULES §1)."""
-    locator.click(delay=random.randint(50, 110))
+def _type_human(page: Page, locator, text: str, clear: bool = False) -> None:
+    """Посимвольный ввод чанками по 3–9 символов, паузы 0.15–0.6 с (RULES §1).
+
+    clear=True: тройной клик выделяет уже подставленное сайтом значение
+    (инцидент #92799459: дефолтные 2000 + наши 2000 = «20002000»),
+    печать поверх выделения его заменяет. На пустом поле безвредно.
+    """
+    if clear:
+        locator.click(click_count=3, delay=random.randint(50, 110))
+    else:
+        locator.click(delay=random.randint(50, 110))
     i = 0
     while i < len(text):
         chunk = text[i : i + random.randint(3, 9)]
@@ -152,11 +168,17 @@ def fill_form(order_page: Page, rate: int, text: str) -> dict:
         raise RespondError("textarea сообщения не найдена в форме")
 
     human_pause(0.6, 1.5)
-    # stavka — числовой INPUT (первый input в окне)
+    # stavka — числовой INPUT (первый input в окне); сайт может подставить
+    # своё значение — тройной клик выделяет его, ввод заменяет
     stavka = inputs.first
-    _type_human(order_page, stavka, str(rate))
+    _type_human(order_page, stavka, str(rate), clear=True)
+    got = (stavka.input_value(timeout=3_000) or "").strip()
+    if got != str(rate):
+        raise RespondError(
+            f"поле ставки после ввода {got!r}, ожидалось {rate!r} — отправка отменена"
+        )
     human_pause(0.7, 1.6)
-    _type_human(order_page, textarea, text)
+    _type_human(order_page, textarea, text, clear=True)
 
     # даём UI пересчитать цену
     order_page.wait_for_timeout(1500)

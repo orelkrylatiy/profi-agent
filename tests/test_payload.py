@@ -58,3 +58,11 @@ class TestClientSummary:
 
     def test_partial(self):
         assert _client_summary({"reviews": 3}) == "отзывов: 3"
+
+
+def test_send_failed_detector():
+    from profi.integration.respond import send_failed
+
+    assert send_failed({"page_text_tail": "Ставка\nПроизошла ошибка. Попробуйте снова"})
+    assert not send_failed({"page_text_tail": "Отклик отправлен, всё хорошо"})
+    assert not send_failed({})

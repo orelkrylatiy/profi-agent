@@ -339,10 +339,14 @@ def run_respond(order_id: str, rate: int, text: str, send: bool) -> int:
         # RPC-200 вокруг клика — лишь телеметрия (фоновая аналитика даёт их почти всегда)
         url_after = outcome.get("url_after", "")
         ok = "r.php" in url_after and f"id={order_id}" in url_after
-        store.set_send_status(order_id, "sent" if ok else "unknown")
-        log.info(
-            "send_status=%s | скриншоты: %s, %s", "sent" if ok else "unknown", shot.name, shot2.name
-        )
+        if ok:
+            status = "sent"
+        elif respond_mod.send_failed(outcome):
+            status = "fail"  # площадка показала ошибку — отправки и списания не было
+        else:
+            status = "unknown"
+        store.set_send_status(order_id, status)
+        log.info("send_status=%s | скриншоты: %s, %s", status, shot.name, shot2.name)
         return 0 if ok else 1
     finally:
         if order_page is not None:
@@ -763,6 +767,12 @@ def run_autopilot() -> int:
                 bid_price = int(d.get("bid_price") or 0)
                 position = d.get("competition_position")
                 # жёсткие проверки до LLM
+                # бейдж «Возможно, вакансия» живёт только в полной карточке
+                # (в сниппете ленты его нет — инцидент #92799459)
+                if "ваканс" in (row["details_json"] or "").lower():
+                    store.set_send_status(order_id, "skipped")
+                    store.set_note(order_id, "скип: карточка помечена «возможно, вакансия»")
+                    continue
                 if bid_price > config.MAX_RESPONSE_PRICE_RUB:
                     store.set_send_status(order_id, "skipped")
                     store.set_note(
