@@ -234,3 +234,35 @@ Playwright — это настоящие CDP Input-события (isTrusted) и
   поле ввода чистое. Запись в chat_log.
 - Ночь итог (мониторы 03:27–04:57): 3 автономных отклика (367/117/163 ₽),
   всего 6 откликов / 1621 ₽, «Комиссия» 6/10, баланс ~419 ₽, лимит дня 3/3.
+
+## 2026-09-02 — реструктуризация: src-layout, чистка scripts, tooling, тесты
+
+- **src-layout**: весь код перенесён в пакет `src/profi/` (git mv, история
+  сохранена) по доменам: `browser/` (CDP), `integration/` (feed/orders/
+  respond/chat), `storage/` (SQLite), `llm/`, `models/`, `utils/` (pacing,
+  textguard), main+config+filters наверху. Импорты абсолютные
+  (`from profi import config`); якоря путей переведены на корень репо
+  (`config.PROJECT_DIR = parents[2]`, `.env` в llm — `parents[3]`).
+- **pyproject**: build-system hatchling (пакет ставится editable через
+  `uv sync`), entry point `profi = "profi.main:main"`, dev-группа pytest+ruff.
+  Запуск везде `uv run python -m profi [команда]`; pgrep/pkill паттерн
+  сериализации воркера: `main\.py$` → `profi\.main$` (менять атомарно!).
+- **scripts/**: 19 → 13 файлов. Удалены мёртвые/одноразовые (run_info/run_lang,
+  launch_browser{,2}, setup_fin, launch_general_browser, api_reader, diag_feed,
+  check_chats, probe_dom_opt, fix_info_worker, restart_lang_browser). Новая
+  раскладка: `browser/`, `account/`, `diag/`; точки входа кронов
+  (rhythm_keeper.sh, autopilot_cron.sh) НЕ двигались — внешний контракт
+  crontab VPS и launchd Mac. Починки консолидированы в generic
+  `account/fix_worker.sh <acc>` и `browser/fix_browser.sh <acc>`.
+- **Tooling**: ruff (lint+format, pyproject), shellcheck 0.11 (file-level
+  `# shellcheck disable=SC1090`; соседние директивы на составных строках не
+  срабатывают — грабля), pre-commit (ruff + ruff-format + shellcheck).
+  autopilot_cron.sh переведён zsh→bash (SC1071; путь через BASH_SOURCE).
+- **Тесты**: 55 проверок чистой логики (`uv run pytest`, <0.2 с): фильтры,
+  парсинг ленты, дедуп/денежные гейты SQLite, is_feed_url, json_reply,
+  резолв PROFI_CHROME_PROFILE.
+- **CI**: GitHub Actions (.github/workflows/ci.yml) — uv sync, ruff,
+  shellcheck, pytest на push/PR.
+- VPS после git pull: `uv sync` + перезапуск браузеров/воркеров; crontab
+  не меняется. Mac: launchd-планировщик не меняется (путь autopilot_cron.sh
+  прежний).
