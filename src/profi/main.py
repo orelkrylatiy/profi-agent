@@ -37,7 +37,7 @@ from profi.integration.orders import (
     open_candidate,
 )
 from profi.storage import Store
-from profi.utils import has_contacts, human_pause
+from profi.utils import has_contacts, human_pause, in_work_hours
 
 log = logging.getLogger("profi.main")
 
@@ -193,15 +193,25 @@ def run_loop(max_cycles: int | None = None) -> int:
     bm = BrowserManager()
     store = Store(config.DB_PATH)
     done = 0
+    started = False
     try:
-        state = bm.start()
-        if state == BROWSER_OFFLINE:
-            return 1
-        log.info("стартовое состояние: %s (max_cycles=%s)", state, max_cycles)
-        if state == AUTH_REQUIRED:
-            show_login_hint()
-
         while True:
+            if not in_work_hours():
+                # вне рабочих часов браузер НЕ трогаем (вкладки не открываются,
+                # лента не перезагружается). Процесс спит и сам просыпается
+                # в окно — иначе ночью его некому перезапустить (RULES: 8–23)
+                log.info("нерабочие часы — мониторинг спит (проверка раз в 10 мин)")
+                time.sleep(10 * 60)
+                continue
+            if not started:
+                state = bm.start()
+                started = True
+                if state == BROWSER_OFFLINE:
+                    return 1
+                log.info("стартовое состояние: %s (max_cycles=%s)", state, max_cycles)
+                if state == AUTH_REQUIRED:
+                    show_login_hint()
+
             state = run_cycle(bm, store)
             done += 1
             # Чаты в том же процессе: каждый N-й цикл после успешной ленты.
@@ -719,6 +729,9 @@ def run_chat_auto(ctx=None) -> int:
     from profi import llm as llm_mod
     from profi.integration import chat as chat_mod
 
+    if not in_work_hours():
+        print("нерабочие часы — чаты не обслуживаем (RULES: 8–23)")
+        return 0
     lock = config.DATA_DIR / "autopilot.lock"
     if not _lock_acquire(lock):
         print("autopilot.lock занят — автопилот работает, выходим")
@@ -870,9 +883,9 @@ def run_autopilot() -> int:
     now = _dt.now()
     lock = config.DATA_DIR / "autopilot.lock"
     try:
-        # рабочие часы (config.WORK_HOURS, по умолчанию 8–23)
-        lo, hi = config.WORK_HOURS
-        if not (lo <= now.hour < hi):
+        # рабочие часы (config.WORK_HOURS, по умолчанию 8–23; общий гейт
+        # с воркером и чатами — utils.workhours)
+        if not in_work_hours(now):
             return 0
         if not _lock_acquire(lock):
             return 0  # живой соседний проход; стейл-лок старше 30 мин подобран сам
@@ -913,7 +926,11 @@ def run_autopilot() -> int:
                         f"скип: цена отклика {bid_price} ₽ > {config.MAX_RESPONSE_PRICE_RUB}",
                     )
                     continue
-                if config.MAX_COMPETITION_POSITION and position is not None and position > config.MAX_COMPETITION_POSITION:
+                if (
+                    config.MAX_COMPETITION_POSITION
+                    and position is not None
+                    and position > config.MAX_COMPETITION_POSITION
+                ):
                     store.set_send_status(order_id, "skipped")
                     store.set_note(order_id, f"скип: позиция {position} > 20")
                     continue

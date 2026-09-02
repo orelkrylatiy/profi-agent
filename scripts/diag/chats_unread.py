@@ -8,7 +8,7 @@ Read-only: своя вкладка, читаем DOM, закрываем.
 
 Выход: одна строка JSON на stdout:
   {"unread": N, "dialogs": M, "names": [...], "changed": true|false, "ok": true}
-  {"ok": false, "error": "..."}   — браузер мёртв и не поднялся
+  {"ok": false, "error": "..."}   — браузер мёртв, не поднялся или нерабочие часы
 Exit-код всегда 0 (ошибки внутри ok:false, чтобы не ломать триггер).
 """
 
@@ -24,6 +24,7 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright
 
 from profi import config
+from profi.utils import in_work_hours
 
 STATE = (
     Path(
@@ -40,6 +41,11 @@ def out(d: dict) -> None:
 
 
 def main() -> int:
+    if not in_work_hours():
+        # вне рабочих часов браузер не открываем; chat_cron.sh на ok:false
+        # просто выходит (RULES: 8–23)
+        out({"ok": False, "error": "нерабочие часы"})
+        return 0
     try:
         pw = sync_playwright().start()
         try:
