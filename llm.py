@@ -57,6 +57,19 @@ def status() -> dict:
     return info
 
 
+def _fallback_key() -> tuple[str | None, str]:
+    """Второй z.ai-ключ (фоллбэк при 429/лимитах): GLM_API_KEY_2 или ZAI_API_KEY_2."""
+    for n in ("GLM_API_KEY_2", "ZAI_API_KEY_2"):
+        if _cfg(n):
+            return _cfg(n), n
+    return None, "GLM_API_KEY_2"
+
+
+def _is_limit_error(err: Exception) -> bool:
+    s = str(err)
+    return "429" in s or "1308" in s or "1310" in s or "Limit" in s
+
+
 def _key(p: str) -> tuple[str | None, str]:
     if p == "glm":
         for n in ("GLM_API_KEY", "ZAI_API_KEY"):
@@ -115,25 +128,43 @@ def _post(url: str, headers: dict, payload: dict) -> dict:
         raise RuntimeError(f"HTTP {e.code} от {url}: {body}") from e
 
 
-def _chat_openai_style(system: str, user: str, temperature: float, max_tokens: int, model: str) -> str:
-    """OpenAI-совместимый протокол (glm, openai)."""
-    key, _ = _key(provider())
-    if not key:
+def _chat_openai_style(system: str, user: str, temperature: float, max_tokens: int) -> str:
+    """OpenAI-совместимый протокол (glm, openai). С фоллбэком на второй ключ."""
+    keys: list[tuple[str, str]] = []
+    key, kname = _key(provider())
+    if key:
+        keys.append((key, kname))
+    if provider() == "glm":
+        k2, n2 = _fallback_key()
+        if k2 and k2 != key:
+            keys.append((k2, n2))
+    if not keys:
         raise RuntimeError("API-ключ не задан")
-    data = _post(
-        _base(provider()) + "/chat/completions",
-        {"Content-Type": "application/json", "Authorization": f"Bearer {key}"},
-        {
-            "model": model,
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-        },
-    )
-    return data["choices"][0]["message"]["content"]
+    last_err: Exception | None = None
+    for i, (k, _) in enumerate(keys):
+        try:
+            data = _post(
+                _base(provider()) + "/chat/completions",
+                {"Content-Type": "application/json", "Authorization": f"Bearer {k}"},
+                {
+                    "model": _model(provider()),
+                    "messages": [
+                        {"role": "system", "content": system},
+                        {"role": "user", "content": user},
+                    ],
+                    "temperature": temperature,
+                    "max_tokens": max_tokens,
+                },
+            )
+            if i > 0:
+                _ENV["_last_used"] = "fallback"
+            return data["choices"][0]["message"]["content"]
+        except Exception as exc:  # лимит/сбой — пробуем следующий ключ
+            last_err = exc
+            if not _is_limit_error(exc) or i == len(keys) - 1:
+                raise
+            time.sleep(2)
+    raise last_err  # pragma: no cover
 
 
 def _chat_anthropic(system: str, user: str, temperature: float, max_tokens: int, model: str) -> str:

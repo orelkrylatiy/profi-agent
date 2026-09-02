@@ -11,7 +11,14 @@ from pathlib import Path
 PROJECT_DIR = Path(__file__).resolve().parent
 DATA_DIR = PROJECT_DIR / "data"
 LOG_DIR = PROJECT_DIR / "logs"
-DB_PATH = DATA_DIR / "profi.db"
+DB_PATH = Path(os.environ.get("PROFI_DB", str(DATA_DIR / "profi.db")))
+
+# --- Персона (промпт) и фильтры: один аккаунт = одна персона ---
+PERSONA = os.environ.get("PROFI_PERSONA", "info")
+PERSONA_DIR = PROJECT_DIR / "personas"
+SUBJECT_KEYWORDS = [s.strip() for s in os.environ.get(
+    "PROFI_SUBJECTS", "информатик,программирован"
+).split(",") if s.strip()]
 
 # --- Chrome (правило: один аккаунт = один user-data-dir, свой CDP-порт) ---
 CHROME_PATH = os.environ.get(
@@ -38,8 +45,7 @@ AUTH_WAIT_S = 30         # период проверки, пока ждём ру
 AUTH_COOLDOWN_S = 30 * 60  # пауза после 401/403
 
 # --- Hard filters (до LLM). Настройки под цель: ЕГЭ/ОГЭ информатика, дистанционно ---
-# Подстроки в title+description (без учёта регистра).
-SUBJECT_KEYWORDS = ["информатик", "программирован"]
+# Подстроки в title+description (без учёта регистра); переопределяется PROFI_SUBJECTS
 MIN_RATE = None          # 2026-08-31: фильтр по цене ВЫКЛЮЧЕН владельцем (вход на площадку, берём любые бюджеты)
 VACANCY_PATTERNS = ["ваканс"]
 REMOTE_ONLY = True        # geo.remote пуст → только очно → skip
@@ -48,6 +54,12 @@ REMOTE_ONLY = True        # geo.remote пуст → только очно → sk
 MAX_RESPONSE_PRICE_RUB = 500   # отклик дороже — отмена отправки
 DAILY_SEND_LIMIT = 3           # платных отправок за сутки максимум
 RATE = 2000                    # ставка ₽/час в форме отклика (RULES: менять здесь)
+
+# --- Тариф отклика (адаптивность: акк может откликаться платно или через комиссию) ---
+# PROFI_RESPOND_MODE: "pay" (платный отклик, дефолт) | "commission" (через комиссию Profi)
+# При "commission" в блоке тарифов выбирается карточка «Комиссия», если она доступна
+# на аккаунте; иначе отправка отменяется с ошибкой (RULES.md §2).
+RESPOND_MODE = os.environ.get("PROFI_RESPOND_MODE", "pay").strip().lower()
 
 # Рабочие часы автопилота (часы локального времени, отправка только внутри)
 # Норма: (8, 23). 2026-09-01 ночь: (0, 24) — тест полной цепочки по приказу
