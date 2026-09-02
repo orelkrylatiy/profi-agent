@@ -47,7 +47,9 @@ DB_PATH = Path(_get("PROFI_DB", str(DATA_DIR / "profi.db")))
 PERSONA = _get("PROFI_PERSONA", "info")
 PERSONA_DIR = PROJECT_DIR / "personas"
 SUBJECT_KEYWORDS = [
-    s.strip() for s in _get("PROFI_SUBJECTS", "информатик,программирован").split(",") if s.strip()
+    s.strip()
+    for s in _get("PROFI_SUBJECTS", "информатик,программирован,математик").split(",")
+    if s.strip()
 ]
 
 # --- Chrome (правило: один аккаунт = один user-data-dir, свой CDP-порт) ---
@@ -87,8 +89,9 @@ VACANCY_PATTERNS = ["ваканс"]
 REMOTE_ONLY = True  # geo.remote пуст → только очно → skip
 
 # --- Денежные предохранители (RULES.md §2; ревью P0-2) ---
-MAX_RESPONSE_PRICE_RUB = 500  # отклик дороже — отмена отправки
-DAILY_SEND_LIMIT = 3  # платных отправок за сутки максимум
+MAX_RESPONSE_PRICE_RUB = int(_get("PROFI_MAX_RESPONSE_PRICE", "500"))  # 0 = без потолка
+DAILY_SEND_LIMIT = int(_get("PROFI_DAILY_SEND_LIMIT", "3"))  # 0 = без дневного лимита
+MAX_COMPETITION_POSITION = int(_get("PROFI_MAX_POSITION", "20"))  # 0 = не проверять позицию
 RATE = 2000  # ставка ₽/час в форме отклика (RULES: менять здесь)
 
 # --- Тариф отклика (адаптивность: акк может откликаться платно или через комиссию) ---
@@ -97,9 +100,20 @@ RATE = 2000  # ставка ₽/час в форме отклика (RULES: ме
 # на аккаунте; иначе отправка отменяется с ошибкой (RULES.md §2).
 RESPOND_MODE = _get("PROFI_RESPOND_MODE", "pay").strip().lower()
 
-# Рабочие часы автопилота (часы локального времени, отправка только внутри)
-# Норма: (8, 23) — как в RULES.md. Ночной тест 2026-09-01 завершён, возвращено.
-WORK_HOURS = (8, 23)
+# Рабочие часы автопилота (часы локального времени, платные отправки только
+# внутри интервала). Дефолт — норма по RULES.md: 8–23. Через .env/окружение
+# задаётся как "начало,конец": PROFI_WORK_HOURS=8,23 или 0,24 (24/7).
+def _parse_work_hours(v: str | None) -> tuple[int, int]:
+    if not v or "," not in v:
+        return (8, 23)
+    lo, _, hi = v.partition(",")
+    try:
+        return (max(0, int(lo.strip())), min(24, int(hi.strip())))
+    except ValueError:
+        return (8, 23)
+
+
+WORK_HOURS = _parse_work_hours(_get("PROFI_WORK_HOURS"))
 
 LOG_LEVEL = _get("PROFI_LOG_LEVEL", "INFO")
 

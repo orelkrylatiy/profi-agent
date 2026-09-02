@@ -67,6 +67,8 @@ logs/               — worker-<acc>.log, autopilot.log, rhythm.log, respond/ (�
 
 - `PROFI_PERSONA`, `PROFI_SUBJECTS`, `PROFI_CDP_PORT`, `PROFI_CHROME_PROFILE`, `PROFI_DB`
 - `PROFI_CHAT_EVERY` — чат-чек каждый N-й цикл воркера (дефолт 3 ≈ раз в 4.5–6 мин)
+- `PROFI_WORK_HOURS` — часы платных отправок автопилота, «начало,конец»
+  (дефолт 8,23 по RULES; сейчас владельцем задано 0,24 — круглосуточно)
 - `PROFI_CHROME_PATH` — путь к chrome-бинарю (на VPS — `scripts/browser/chrome-vps.sh`);
   дефолт в config.py — мак-путь, на VPS ОБЯЗАТЕЛЬНО переопределять
 - `PROFI_RESPOND_MODE` — тариф отклика: `pay` (платный, дефолт) | `commission`

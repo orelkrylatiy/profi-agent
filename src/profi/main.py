@@ -323,7 +323,7 @@ def run_respond(order_id: str, rate: int, text: str, send: bool) -> int:
             order_page.close(run_before_unload=False)
             return 1
         sent_today = store.sends_today()
-        if sent_today >= config.DAILY_SEND_LIMIT:
+        if config.DAILY_SEND_LIMIT and sent_today >= config.DAILY_SEND_LIMIT:
             log.error(
                 "ОТМЕНА: дневной лимит отправок (%d/%d, DAILY_SEND_LIMIT)",
                 sent_today,
@@ -477,7 +477,7 @@ def _payment_due(mode: str, footer: dict) -> tuple[int | None, str]:
         return 0, ""
     if to_pay is None:
         return None, "не смог прочитать «К оплате»"
-    if to_pay > config.MAX_RESPONSE_PRICE_RUB:
+    if config.MAX_RESPONSE_PRICE_RUB and to_pay > config.MAX_RESPONSE_PRICE_RUB:
         return None, f"к оплате {to_pay} ₽ > потолка {config.MAX_RESPONSE_PRICE_RUB} ₽"
     return to_pay, ""
 
@@ -906,14 +906,14 @@ def run_autopilot() -> int:
                     store.set_send_status(order_id, "skipped")
                     store.set_note(order_id, "скип: карточка помечена «возможно, вакансия»")
                     continue
-                if bid_price > config.MAX_RESPONSE_PRICE_RUB:
+                if config.MAX_RESPONSE_PRICE_RUB and bid_price > config.MAX_RESPONSE_PRICE_RUB:
                     store.set_send_status(order_id, "skipped")
                     store.set_note(
                         order_id,
                         f"скип: цена отклика {bid_price} ₽ > {config.MAX_RESPONSE_PRICE_RUB}",
                     )
                     continue
-                if position is not None and position > 20:
+                if config.MAX_COMPETITION_POSITION and position is not None and position > config.MAX_COMPETITION_POSITION:
                     store.set_send_status(order_id, "skipped")
                     store.set_note(order_id, f"скип: позиция {position} > 20")
                     continue
