@@ -15,8 +15,8 @@ from urllib.parse import urlparse
 
 from playwright.sync_api import Page, Response
 
-import config
-from models import FeedSnapshot, OrderSnippet
+from profi import config
+from profi.models import FeedSnapshot, OrderSnippet
 
 log = logging.getLogger("profi.feed")
 

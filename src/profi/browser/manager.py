@@ -13,7 +13,7 @@ from urllib.parse import urlparse
 
 from playwright.sync_api import Browser, BrowserContext, Page, sync_playwright
 
-import config
+from profi import config
 
 log = logging.getLogger("profi.browser")
 

@@ -1,15 +1,15 @@
-"""Контур A — milestone «читатель ленты» (спека разд. 31, до LLM-триажа).
+"""Контур A — CLI и оркестрация: воркер ленты, autopilot, чаты (спека разд. 31).
 
-Цикл (single-flight, спека разд. 27):
+Цикл воркера (single-flight, спека разд. 27):
   health → reload + перехват BoSearchBoardItems → нормализация →
-  diff по feed_seen → hard filter → лог. Ничего не открывает и не отправляет.
+  diff по feed_seen → hard filter → кандидат → детали.
 
 Использование:
-  uv run python main.py --once            # один цикл, для проверки
-  uv run python main.py                   # рабочий цикл 90–120 с (ждёт логин сам)
-  uv run python main.py candidates        # список кандидатов
-  uv run python main.py sent <order_id>   # ручной гейт
-  uv run python main.py skip <order_id>   # ручной гейт
+  uv run python -m profi --once           # один цикл, для проверки
+  uv run python -m profi                  # рабочий цикл 90–120 с (ждёт логин сам)
+  uv run python -m profi candidates       # список кандидатов
+  uv run python -m profi sent <order_id>  # ручной гейт
+  uv run python -m profi skip <order_id>  # ручной гейт
 """
 from __future__ import annotations
 
@@ -18,18 +18,23 @@ import json
 import logging
 import os
 import random
-import re
 import subprocess
 import sys
 import time
 from datetime import datetime
 
-import config
-import store as store_mod
-from browser import AUTH_REQUIRED, BROWSER_OFFLINE, BrowserManager
-from feed import FeedAmbiguous, FeedAuthError, FeedCapture, FeedCaptureError
-from filters import hard_filter
-from orders import OrderOpenError, extract_dom_texts, extract_full_order, human_pause, open_candidate
+from profi import config
+from profi.browser import AUTH_REQUIRED, BROWSER_OFFLINE, BrowserManager
+from profi.filters import hard_filter
+from profi.integration.feed import FeedAmbiguous, FeedAuthError, FeedCapture, FeedCaptureError
+from profi.integration.orders import (
+    OrderOpenError,
+    extract_dom_texts,
+    extract_full_order,
+    open_candidate,
+)
+from profi.storage import Store
+from profi.utils import has_contacts, human_pause
 
 log = logging.getLogger("profi.main")
 
@@ -70,7 +75,7 @@ def save_capture_diag(diag: list[dict], err: str) -> None:
     log.info("диагностика захвата сохранена: %s", path)
 
 
-def load_details(bm: BrowserManager, store: store_mod.Store, order_id: str) -> str:
+def load_details(bm: BrowserManager, store: Store, order_id: str) -> str:
     """Открыть заказ → BoOrderScreen → FullOrder → UPDATE candidates (спека §19-22).
 
     Одна order-вкладка за раз, закрывается после обработки.
@@ -110,7 +115,7 @@ def load_details(bm: BrowserManager, store: store_mod.Store, order_id: str) -> s
             pass
 
 
-def run_cycle(bm: BrowserManager, store: store_mod.Store) -> str:
+def run_cycle(bm: BrowserManager, store: Store) -> str:
     """Один worker cycle. Возвращает состояние, в котором остановились."""
     state = bm.ensure_ready()
     if state != "READY":
@@ -183,7 +188,7 @@ def run_cycle(bm: BrowserManager, store: store_mod.Store) -> str:
 
 def run_loop(max_cycles: int | None = None) -> int:
     bm = BrowserManager()
-    store = store_mod.Store(config.DB_PATH)
+    store = Store(config.DB_PATH)
     done = 0
     try:
         state = bm.start()
@@ -225,7 +230,7 @@ def run_loop(max_cycles: int | None = None) -> int:
 
 def run_once() -> int:
     bm = BrowserManager()
-    store = store_mod.Store(config.DB_PATH)
+    store = Store(config.DB_PATH)
     try:
         state = bm.start()
         if state == BROWSER_OFFLINE:
@@ -249,7 +254,7 @@ def run_respond(order_id: str, rate: int, text: str, send: bool) -> int:
     RULES.md: кастомный текст обязателен; финальный клик только с --send;
     первый реальный отклик — после подтверждения владельцем.
     """
-    import respond as respond_mod
+    from profi.integration import respond as respond_mod
     from datetime import datetime
 
     out_dir = config.LOG_DIR / "respond"
@@ -257,7 +262,7 @@ def run_respond(order_id: str, rate: int, text: str, send: bool) -> int:
     stamp = datetime.now().strftime("%H%M%S")
 
     bm = BrowserManager()
-    store = store_mod.Store(config.DB_PATH)
+    store = Store(config.DB_PATH)
     order_page = None
     try:
         state = bm.start()
@@ -342,7 +347,7 @@ def run_respond(order_id: str, rate: int, text: str, send: bool) -> int:
 def run_fetch_details(order_id: str) -> int:
     """Открыть конкретный заказ и записать FullOrder в БД (для тестов/дозагрузки)."""
     bm = BrowserManager()
-    store = store_mod.Store(config.DB_PATH)
+    store = Store(config.DB_PATH)
     try:
         state = bm.start()
         if state == BROWSER_OFFLINE:
@@ -362,14 +367,14 @@ def run_fetch_details(order_id: str) -> int:
 
 def _worker_running() -> bool:
     try:
-        out = subprocess.run(["pgrep", "-f", r"main\.py$"], capture_output=True, text=True)
+        out = subprocess.run(["pgrep", "-f", r"profi\.main$"], capture_output=True, text=True)
         return bool(out.stdout.strip())
     except Exception:
         return False
 
 
 def _stop_worker() -> None:
-    subprocess.run(["pkill", "-f", r"main\.py$"], capture_output=True)
+    subprocess.run(["pkill", "-f", r"profi\.main$"], capture_output=True)
     time.sleep(3)
 
 
@@ -378,7 +383,7 @@ def _start_worker() -> None:
 
     cmd = os.environ.get(
         "PROFI_WORKER_START_CMD",
-        "cd /Users/m.s.agafonov/profi && nohup uv run python main.py >> logs/worker.log 2>&1 &",
+        f"cd {config.PROJECT_DIR} && nohup uv run python -m profi.main >> logs/worker.log 2>&1 &",
     )
     subprocess.Popen(["/bin/bash", "-c", cmd], start_new_session=True)
 
@@ -408,11 +413,6 @@ TRIAGE_SYSTEM = (
     '"text": "текст отклика клиенту, до 500 символов, только при verdict=send"} '
 )
 
-# постчек текста LLM: контакты/ссылки в сообщении клиенту запрещены (анти-инъекция)
-_CONTACTS_RE = re.compile(
-    r"https?://|www\.|[\w.\-]+@[\w.\-]+|\+?\d[\d\s\-()]{8,}|t\.me|telegram|whatsapp|телеграм",
-    re.I,
-)
 
 CHAT_SYSTEM = (
     "Ты — репетитор информатики и программирования (по основной работе — "
@@ -445,7 +445,7 @@ def _chat_page():
 
 def run_chats() -> int:
     """Список диалогов: имя, непрочитанные, превью."""
-    import chat as chat_mod
+    from profi.integration import chat as chat_mod
 
     pw, browser, page = _chat_page()
     try:
@@ -470,8 +470,8 @@ def run_chats() -> int:
 def run_chat_auto() -> int:
     """Ответить (LLM) на непрочитанные диалоги. ≤2 за запуск, 1 ответ на диалог,
     не чаще раза в 30 мин на диалог, анти-инъекция, журнал в chat_log."""
-    import chat as chat_mod
-    import llm as llm_mod
+    from profi.integration import chat as chat_mod
+    from profi import llm as llm_mod
 
     lock = config.DATA_DIR / "autopilot.lock"
     if lock.exists():
@@ -479,7 +479,7 @@ def run_chat_auto() -> int:
         return 0
     lock.touch()
     pw = browser = page = None
-    store = store_mod.Store(config.DB_PATH)
+    store = Store(config.DB_PATH)
     replied = []
     try:
         pw, browser, page = _chat_page()
@@ -505,9 +505,7 @@ def run_chat_auto() -> int:
                 try:
                     raw = llm_mod.chat(CHAT_SYSTEM, user_prompt, temperature=0.5,
                                        max_tokens=1500, model=m)
-                    raw = raw.strip().removeprefix("```json").removeprefix("```") \
-                        .removesuffix("```").strip()
-                    verdict = json.loads(raw)
+                    verdict = llm_mod.json_reply(raw)
                     break
                 except Exception as e:
                     log.warning("chat LLM %s: %s", m, e)
@@ -522,7 +520,7 @@ def run_chat_auto() -> int:
             reply = str(verdict.get("reply") or "").strip()
             if len(reply) < 10:
                 continue
-            if _CONTACTS_RE.search(reply):
+            if has_contacts(reply):
                 store.log_chat(order_id, d["name"], "system", "INJECTION_GUARD: контакты в тексте")
                 print(f"{d['name']}: постчек отклонил текст")
                 continue
@@ -562,7 +560,7 @@ def run_llm_check(model: str | None) -> int:
     """Живая проверка LLM: провайдер, ключ (маскирован), тестовый вызов."""
     import time as _t
 
-    import llm as llm_mod
+    from profi import llm as llm_mod
 
     if model:
         os.environ["LLM_MODEL"] = model
@@ -597,7 +595,7 @@ def run_autopilot() -> int:
     завершается молча — ноль холостых расходов.
     """
     from datetime import datetime as _dt
-    import llm as llm_mod
+    from profi import llm as llm_mod
 
     now = _dt.now()
     lock = config.DATA_DIR / "autopilot.lock"
@@ -613,7 +611,7 @@ def run_autopilot() -> int:
                 return 0
         lock.touch()
 
-        store = store_mod.Store(config.DB_PATH)
+        store = Store(config.DB_PATH)
         try:
             rows = store.conn.execute(
                 "SELECT order_id, details_json FROM candidates "
@@ -661,9 +659,7 @@ def run_autopilot() -> int:
                         raw = llm_mod.chat(
                             TRIAGE_SYSTEM, user_prompt, temperature=0.4, max_tokens=tok, model=m
                         )
-                        raw = raw.strip().removeprefix("```json").removeprefix("```") \
-                            .removesuffix("```").strip()
-                        verdict = json.loads(raw)
+                        verdict = llm_mod.json_reply(raw)
                         model_used = m
                         break
                     except Exception as e:
@@ -687,7 +683,7 @@ def run_autopilot() -> int:
 
                 text = str(verdict.get("text") or "").strip()
                 # анти-инъекция: контакты/ссылки в тексте клиенту запрещены
-                if _CONTACTS_RE.search(text):
+                if has_contacts(text):
                     store.set_send_status(order_id, "skipped")
                     store.set_note(order_id, "скип: постчек нашёл контакты/ссылку в тексте LLM")
                     with open(config.LOG_DIR / "autopilot.log", "a", encoding="utf-8") as f:
@@ -768,7 +764,7 @@ def run_autopilot() -> int:
 
 
 def run_cli(command: str, order_id: str | None, args_text: str | None = None) -> int:
-    store = store_mod.Store(config.DB_PATH)
+    store = Store(config.DB_PATH)
     try:
         if command == "candidates":
             rows = store.list_candidates()
@@ -783,7 +779,7 @@ def run_cli(command: str, order_id: str | None, args_text: str | None = None) ->
             return 0
         if command == "note":
             if not order_id or not args_text:
-                print("укажи order_id и текст: main.py note <order_id> 'описание' (текст в --text)")
+                print("укажи order_id и текст: profi note <order_id> 'описание' (текст в --text)")
                 return 2
             if store.set_note(order_id, args_text):
                 print(f"#{order_id} → описание записано")
@@ -811,7 +807,7 @@ def run_cli(command: str, order_id: str | None, args_text: str | None = None) ->
             return 0
         if command in ("sent", "skip"):
             if not order_id:
-                print(f"укажи order_id: main.py {command} <order_id>")
+                print(f"укажи order_id: profi {command} <order_id>")
                 return 2
             status = "sent" if command == "sent" else "skipped"
             if store.set_send_status(order_id, status):
@@ -825,7 +821,7 @@ def run_cli(command: str, order_id: str | None, args_text: str | None = None) ->
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Контур A: воркер откликов Профи.ру")
+    parser = argparse.ArgumentParser(description="Контур A: воркер откликов Профи.ру", prog="profi")
     parser.add_argument(
         "command", nargs="?",
         choices=["sent", "skip", "candidates", "fetch-details", "respond", "note", "stats",
@@ -846,12 +842,12 @@ def main() -> int:
     if args.command:
         if args.command == "fetch-details":
             if not args.order_id:
-                print("укажи order_id: main.py fetch-details <order_id>")
+                print("укажи order_id: profi fetch-details <order_id>")
                 return 2
             return run_fetch_details(args.order_id)
         if args.command == "respond":
             if not args.order_id or not args.rate or not args.text:
-                print("usage: main.py respond <order_id> --rate 2500 --text '...' [--send]")
+                print("usage: profi respond <order_id> --rate 2500 --text '...' [--send]")
                 return 2
             return run_respond(args.order_id, args.rate, args.text, send=args.send)
         if args.command == "autopilot":

@@ -25,5 +25,5 @@ if [ -f "accounts/$ACC.ready" ]; then
     setsid env PROFI_RHYTHM_TAG="$ACC" PROFI_PERSONA="$PROFI_PERSONA" PROFI_DB="$PROFI_DB" \
       PROFI_CHROME_PROFILE="$PROFI_CHROME_PROFILE" PROFI_CDP_PORT="$PROFI_CDP_PORT" \
       ${PROFI_SUBJECTS:+PROFI_SUBJECTS="$PROFI_SUBJECTS"} \
-      xvfb-run -a uv run python main.py >> "logs/worker-$ACC.log" 2>&1 &
+      xvfb-run -a uv run python -m profi.main >> "logs/worker-$ACC.log" 2>&1 &
 fi

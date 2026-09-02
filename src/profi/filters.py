@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import re
 
-import config
-from models import FilterVerdict, OrderSnippet
+from profi import config
+from profi.models import FilterVerdict, OrderSnippet
 
 _NUM_RE = re.compile(r"\d[\d\s\u00a0]*")
 

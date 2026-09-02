@@ -8,7 +8,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-PROJECT_DIR = Path(__file__).resolve().parent
+PROJECT_DIR = Path(__file__).resolve().parents[2]  # src/profi/config.py → корень репо
 DATA_DIR = PROJECT_DIR / "data"
 LOG_DIR = PROJECT_DIR / "logs"
 DB_PATH = Path(os.environ.get("PROFI_DB", str(DATA_DIR / "profi.db")))

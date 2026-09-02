@@ -15,7 +15,7 @@ export PROFI_CDP_PORT=9224
 export PROFI_SUBJECTS="английск,испанск,english,spanish,eng,исп"
 cd /root/profi-agent
 [ -f data/lang_ready ] || exit 0   # воркер после логина второго акка
-exec xvfb-run -a uv run python main.py autopilot
+exec xvfb-run -a uv run python -m profi.main autopilot
 EOF
 chmod +x /root/profi-autopilot2-cron.sh
 

@@ -26,7 +26,7 @@ _TIMEOUT_S = 90
 
 def _load_env_file() -> dict:
     env: dict = {}
-    path = Path(__file__).resolve().parent / ".env"
+    path = Path(__file__).resolve().parents[3] / ".env"  # src/profi/llm/ → корень репо
     if path.exists():
         for line in path.read_text(encoding="utf-8").splitlines():
             line = line.strip()
@@ -203,3 +203,13 @@ def chat(system: str, user: str, temperature: float = 0.7, max_tokens: int = 900
     if p == "anthropic":
         return _chat_anthropic(system, user, temperature, max_tokens, m)
     return _chat_openai_style(system, user, temperature, max_tokens, m)  # glm, openai
+
+
+def json_reply(raw: str) -> dict:
+    """Парсинг JSON-вердикта LLM: срезаем ```-забор и парсим.
+
+    Падает исключением на мусоре — вызывающий код решает, что делать
+    (ретрай другой моделью / needs_human).
+    """
+    raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+    return json.loads(raw)

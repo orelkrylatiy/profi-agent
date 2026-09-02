@@ -13,7 +13,7 @@ import time
 
 from playwright.sync_api import Page
 
-from orders import human_pause
+from profi.utils.pacing import human_pause
 
 log = logging.getLogger("profi.chat")
 

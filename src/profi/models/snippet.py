@@ -35,21 +35,3 @@ class OrderSnippet:
     # исходный item как есть — ляжет в candidates.snippet_json
     raw: dict | None = None
 
-
-@dataclass
-class FeedSnapshot:
-    """Canonical ответ BoSearchBoardItems, нормализованный."""
-
-    snippets: list[OrderSnippet]
-    total_count: int | None
-    next_cursor: str | None
-    server_ts: int | None
-    raw: dict
-
-
-@dataclass
-class FilterVerdict:
-    """Результат hard filter (спека разд. 14): PASS / SKIP + причина для лога."""
-
-    passed: bool
-    reason: str

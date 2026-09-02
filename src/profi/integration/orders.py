@@ -15,7 +15,9 @@ from urllib.parse import urlparse, parse_qs
 
 from playwright.sync_api import BrowserContext, Page, Response
 
-from feed import _operation_name  # noqa: PLW0603 — общий контракт операции
+from profi.utils.pacing import human_pause
+
+from profi.integration.feed import _operation_name  # noqa: PLW0603 — общий контракт операции
 
 log = logging.getLogger("profi.orders")
 
@@ -25,10 +27,6 @@ ORDER_OPERATION = "BoOrderScreen"
 class OrderOpenError(Exception):
     pass
 
-
-def human_pause(lo: float = 0.6, hi: float = 1.8) -> None:
-    """Человеческая пауза между действиями (RULES.md §1)."""
-    time.sleep(random.uniform(lo, hi))
 
 
 def _is_order_response(resp: Response) -> bool:

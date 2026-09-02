@@ -11,4 +11,4 @@ curl -s -m 3 http://127.0.0.1:9223/json/version >/dev/null 2>&1 || \
 pgrep -f "PROFI_RHYTHM_TAG=info" >/dev/null 2>&1 || \
   cd /root/profi-agent && setsid env PROFI_RHYTHM_TAG=info PROFI_PERSONA=info PROFI_DB=/root/profi-agent/data/profi.db \
     PROFI_CHROME_PROFILE=/root/profi-agent/data/browser-profiles/profi PROFI_CDP_PORT=9223 \
-    xvfb-run -a uv run python main.py >> logs/worker-info.log 2>&1 &
+    xvfb-run -a uv run python -m profi.main >> logs/worker-info.log 2>&1 &

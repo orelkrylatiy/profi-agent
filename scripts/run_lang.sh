@@ -15,5 +15,5 @@ if [ -f /root/profi-agent/data/lang.db ]; then
     cd /root/profi-agent && setsid env PROFI_RHYTHM_TAG=lang PROFI_PERSONA=lang PROFI_DB=/root/profi-agent/data/lang.db \
       PROFI_CHROME_PROFILE=/root/profi-agent/data/browser-profiles/profi2 PROFI_CDP_PORT=9224 \
       PROFI_SUBJECTS="английск,испанск,english,spanish,eng,исп" \
-      xvfb-run -a uv run python main.py >> logs/worker-lang.log 2>&1 &
+      xvfb-run -a uv run python -m profi.main >> logs/worker-lang.log 2>&1 &
 fi

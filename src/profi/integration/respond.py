@@ -17,7 +17,8 @@ import time
 
 from playwright.sync_api import BrowserContext, Page, Response
 
-from orders import OrderOpenError, human_pause, open_candidate
+from profi.integration.orders import OrderOpenError, open_candidate
+from profi.utils.pacing import human_pause
 
 log = logging.getLogger("profi.respond")
 
