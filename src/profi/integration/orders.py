@@ -15,6 +15,7 @@ from urllib.parse import parse_qs, urlparse
 
 from playwright.sync_api import BrowserContext, Page, Response
 
+from profi import config
 from profi.integration.feed import _operation_name  # noqa: PLW0603 — общий контракт операции
 from profi.utils.pacing import human_pause
 
@@ -63,12 +64,22 @@ def open_candidate(
                 pass
             card = feed_page.get_by_test_id(f"{order_id}_order-snippet")
         if card.count() == 0:
-            raise OrderOpenError(f"карточка #{order_id} не найдена в ленте (data-testid)")
-        card.scroll_into_view_if_needed(timeout=10_000)
-        human_pause()
-        with feed_page.expect_popup(timeout=20_000) as popup_info:
-            card.click(delay=random.randint(60, 140))
-        order_page = popup_info.value
+            # Заказ ушёл с видимой страницы ленты (очередь копится часами,
+            # лента перегенерируется) — это НЕ «заказ недоступен»: карточка
+            # открывается напрямую по штатному URL n.php?o=<id>.
+            log.info("карточки #%s нет в ленте — открываю по прямому URL", order_id)
+            order_page = ctx.new_page()
+            order_page.goto(
+                f"{config.FEED_URL}?o={order_id}",
+                wait_until="domcontentloaded",
+                timeout=45_000,
+            )
+        else:
+            card.scroll_into_view_if_needed(timeout=10_000)
+            human_pause()
+            with feed_page.expect_popup(timeout=20_000) as popup_info:
+                card.click(delay=random.randint(60, 140))
+            order_page = popup_info.value
     except OrderOpenError:
         ctx.remove_listener("response", on_response)
         raise
