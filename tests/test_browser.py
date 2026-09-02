@@ -30,3 +30,8 @@ def test_feed_urls(url):
 )
 def test_not_feed_urls(url):
     assert not is_feed_url(url)
+
+
+def test_query_param_lookalike_is_feed():
+    # ?logo=1 содержит подстроку "o=", но параметра o нет — это лента (ревью P3)
+    assert is_feed_url("https://profi.ru/backoffice/n.php?logo=1")

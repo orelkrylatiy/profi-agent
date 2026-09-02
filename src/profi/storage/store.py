@@ -71,13 +71,17 @@ FROM candidates;
 
 # feed_seen: NEW / UPDATED / UNCHANGED
 # candidates.details_status: pending / ready / error
-# candidates.draft_status:   pending / generating / generated / error / stale
+# candidates.draft_status:   pending / generating / generated / error
 # candidates.send_status:    not_sent / sent / unknown; v1-расширение: skipped
 
 
 class Store:
     def __init__(self, db_path):
-        self.conn = sqlite3.connect(db_path)
+        # WAL + таймаут: воркер и автопилот пишут в одну БД из двух процессов
+        # (ревью P2) — без этого редкие "database is locked"
+        self.conn = sqlite3.connect(db_path, timeout=30)
+        self.conn.execute("PRAGMA journal_mode=WAL")
+        self.conn.execute("PRAGMA busy_timeout=30000")
         self.conn.row_factory = sqlite3.Row
         self.conn.executescript(SCHEMA)
         self.conn.commit()
@@ -143,16 +147,6 @@ class Store:
             "UPDATE candidates SET details_status = ?, details_json = ?, details_loaded_at = ?, "
             "updated_at = ? WHERE order_id = ?",
             (status, details_json, now if status == "ready" else None, now, order_id),
-        )
-        self.conn.commit()
-
-    def mark_draft_stale(self, order_id: str) -> None:
-        now = int(time.time())
-        self.conn.execute(
-            "UPDATE candidates SET draft_status = 'stale', source_last_update = "
-            "(SELECT last_update FROM feed_seen WHERE order_id = candidates.order_id), "
-            "updated_at = ? WHERE order_id = ?",
-            (now, order_id),
         )
         self.conn.commit()
 

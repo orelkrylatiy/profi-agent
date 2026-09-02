@@ -97,3 +97,10 @@ class TestResponsesView:
         assert row["bid_price"] == 300
         assert row["position"] == 5
         assert row["send_status"] == "sent"
+
+
+def test_wal_mode(tmp_path):
+    # два процесса на одной БД (воркер + автопилот) — WAL обязателен (ревью P2)
+    store = make_store(tmp_path)
+    mode = store.conn.execute("PRAGMA journal_mode").fetchone()[0]
+    assert mode.lower() == "wal"

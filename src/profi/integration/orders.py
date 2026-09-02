@@ -155,6 +155,9 @@ def extract_full_order(payload: dict, dom_text: str | None) -> dict:
     full = {
         "id": str(bo.get("id") or root.get("_id")),
         "subject": bo.get("subject") or root.get("subjects"),
+        "card_tags": [
+            t["text"] for t in bo.get("tags") or [] if isinstance(t, dict) and t.get("text")
+        ],
         "description": param_text("Описание"),
         "student": param_text("Ученик"),
         "wishes": param_text("Пожелания"),

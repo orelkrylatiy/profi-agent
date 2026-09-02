@@ -17,7 +17,7 @@ stop_all() {
   for ENVF in "$BASE"/accounts/*.env; do
     ACC=$(basename "$ENVF" .env)
     . "$ENVF"
-    pkill -f "PROFI_RHYTHM_TAG=$ACC" 2>/dev/null
+    pkill -f "profi.main --rhythm-tag $ACC\$" 2>/dev/null
     pkill -f "user-data-dir=${PROFI_CHROME_PROFILE}" 2>/dev/null
   done
 }

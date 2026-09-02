@@ -47,9 +47,7 @@ DB_PATH = Path(_get("PROFI_DB", str(DATA_DIR / "profi.db")))
 PERSONA = _get("PROFI_PERSONA", "info")
 PERSONA_DIR = PROJECT_DIR / "personas"
 SUBJECT_KEYWORDS = [
-    s.strip()
-    for s in _get("PROFI_SUBJECTS", "информатик,программирован").split(",")
-    if s.strip()
+    s.strip() for s in _get("PROFI_SUBJECTS", "информатик,программирован").split(",") if s.strip()
 ]
 
 # --- Chrome (правило: один аккаунт = один user-data-dir, свой CDP-порт) ---
@@ -100,9 +98,8 @@ RATE = 2000  # ставка ₽/час в форме отклика (RULES: ме
 RESPOND_MODE = _get("PROFI_RESPOND_MODE", "pay").strip().lower()
 
 # Рабочие часы автопилота (часы локального времени, отправка только внутри)
-# Норма: (8, 23). 2026-09-01 ночь: (0, 24) — тест полной цепочки по приказу
-# владельца («пусть всю ночь работает — проверим как ловит и доводит до отклика»)
-WORK_HOURS = (0, 24)
+# Норма: (8, 23) — как в RULES.md. Ночной тест 2026-09-01 завершён, возвращено.
+WORK_HOURS = (8, 23)
 
 LOG_LEVEL = _get("PROFI_LOG_LEVEL", "INFO")
 

@@ -1,4 +1,5 @@
 """Компактный слепок карточки для LLM (main._llm_order_payload)."""
+
 from profi.main import _client_summary, _llm_order_payload
 
 
@@ -11,7 +12,12 @@ def make_order() -> dict:
         "wishes": "Подготовка к ВСОШ",
         "remote": "Москва (МСК+0)",
         "address": None,
-        "client_block_dom": {"name": "Ольга", "profile_since": "2009", "phone_verified": True, "reviews": 10},
+        "client_block_dom": {
+            "name": "Ольга",
+            "profile_since": "2009",
+            "phone_verified": True,
+            "reviews": 10,
+        },
         "bid_price": "256",
         "has_bid": False,
         "competition_position": 26,

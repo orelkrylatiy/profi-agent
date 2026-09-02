@@ -196,6 +196,11 @@ def _chat_anthropic(system: str, user: str, temperature: float, max_tokens: int,
     return "".join(parts)
 
 
+def set_model(model: str) -> None:
+    """Переопределить LLM_MODEL (llm-check --model)."""
+    _ENV["LLM_MODEL"] = model
+
+
 def chat(
     system: str,
     user: str,

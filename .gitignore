@@ -6,3 +6,4 @@ logs/
 chrome-profile/
 .env
 .DS_Store
+accounts/*.env

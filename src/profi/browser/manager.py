@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 import subprocess
 import time
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from playwright.sync_api import Browser, BrowserContext, Page, sync_playwright
 
@@ -26,15 +26,20 @@ PROFI_UNAVAILABLE = "PROFI_UNAVAILABLE"
 
 
 def is_feed_url(url: str) -> bool:
-    """Feed page: host = profi.ru, path = /backoffice/n.php, без o=<id> в query."""
+    """Feed page: host = profi.ru, path = /backoffice/n.php, без параметра o=<id>.
+
+    o ищем parse_qs (точное имя параметра), а не подстрокой «o=»:
+    ?logo=1 — тоже валидная лента, не AUTH_REQUIRED (ревью P3).
+    """
     p = urlparse(url)
-    return (
+    if not (
         p.scheme in ("http", "https")
         and p.hostname is not None
         and (p.hostname == config.FEED_HOST or p.hostname.endswith("." + config.FEED_HOST))
         and p.path == config.FEED_PATH
-        and "o=" not in (p.query or "")
-    )
+    ):
+        return False
+    return "o" not in parse_qs(p.query)
 
 
 class BrowserManager:
@@ -132,6 +137,10 @@ class BrowserManager:
         log.error("не смог подключиться к CDP :%s за 25 с", config.CDP_PORT)
         return None
 
+    def context(self) -> BrowserContext:
+        """Дефолтный контекст Chrome (реальный, с сессией) — публичный API."""
+        return self._default_context()
+
     def _default_context(self) -> BrowserContext:
         if self.browser.contexts:
             return self.browser.contexts[0]
@@ -142,8 +151,8 @@ class BrowserManager:
     def _find_feed_page(self, ctx: BrowserContext) -> Page | None:
         for page in ctx.pages:
             try:
-                # вкладка с ?o= — открытый заказ, не лента (само-лечение после навигации)
-                if is_feed_url(page.url) and "o=" not in page.url.split("?", 1)[-1]:
+                # вкладка с ?o= — открытый заказ, не лента (o= уже в is_feed_url)
+                if is_feed_url(page.url):
                     log.info("нашёл вкладку ленты: %s", page.url)
                     return page
             except Exception:

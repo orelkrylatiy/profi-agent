@@ -20,11 +20,14 @@ cd "$BASE" || exit 1
 curl -s -m 3 "http://127.0.0.1:${PROFI_CDP_PORT}/json/version" >/dev/null 2>&1 || \
   setsid "$BASE/scripts/browser/launch_account_browser.sh" "$ACC" </dev/null >> "logs/browser-$ACC.log" 2>&1 &
 
-# воркер — только если акк залогинен (флаг accounts/<acc>.ready)
+# воркер — только если акк залогинен (флаг accounts/<acc>.ready).
+# Тег --rhythm-tag остаётся в argv (env-присваивания из cmdline исчезают
+# после exec — старый паттерн PROFI_RHYTHM_TAG= никогда не находил воркер).
+WPAT="profi.main --rhythm-tag $ACC\$"
 if [ -f "accounts/$ACC.ready" ]; then
-  pgrep -f "PROFI_RHYTHM_TAG=$ACC" >/dev/null 2>&1 || \
+  pgrep -f "$WPAT" >/dev/null 2>&1 || \
     setsid env PROFI_RHYTHM_TAG="$ACC" PROFI_PERSONA="$PROFI_PERSONA" PROFI_DB="$PROFI_DB" \
       PROFI_CHROME_PROFILE="$PROFI_CHROME_PROFILE" PROFI_CDP_PORT="$PROFI_CDP_PORT" \
       ${PROFI_SUBJECTS:+PROFI_SUBJECTS="$PROFI_SUBJECTS"} \
-      xvfb-run -a uv run python -m profi.main >> "logs/worker-$ACC.log" 2>&1 &
+      xvfb-run -a uv run python -m profi.main --rhythm-tag "$ACC" >> "logs/worker-$ACC.log" 2>&1 &
 fi

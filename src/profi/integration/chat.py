@@ -10,11 +10,10 @@ from __future__ import annotations
 import logging
 import random
 import re
-import time
 
 from playwright.sync_api import Page
 
-from profi.utils.pacing import human_pause
+from profi.utils.pacing import human_pause, type_human
 
 log = logging.getLogger("profi.chat")
 
@@ -59,8 +58,17 @@ def read_dialog_text(page: Page) -> str:
     return page.locator("body").inner_text(timeout=8_000)
 
 
+def _box_value(box) -> str:
+    tag = box.evaluate("e => e.tagName")
+    return box.input_value(timeout=3_000) if tag != "DIV" else box.inner_text()
+
+
 def send_reply(page: Page, text: str) -> bool:
-    """Посимвольный ввод ответа + отправка (Enter, при необходимости кнопка)."""
+    """Посимвольный ввод ответа + отправка (Enter, при необходимости кнопка).
+
+    True — только если поле ввода опустело: сообщение реально ушло
+    (ревью P2; паритет с верификацией отклика по редиректу r.php).
+    """
     box = None
     for sel in (
         'textarea[placeholder*="ообщени"]',
@@ -83,27 +91,25 @@ def send_reply(page: Page, text: str) -> bool:
         return False
 
     human_pause(0.8, 1.6)
-    box.click(delay=random.randint(50, 110))
-    i = 0
-    while i < len(text):
-        chunk = text[i : i + random.randint(3, 9)]
-        page.keyboard.type(chunk, delay=random.randint(45, 110))
-        i += len(chunk)
-        if i < len(text):
-            time.sleep(random.uniform(0.15, 0.6))
+    type_human(page, box, text)
     human_pause(0.5, 1.2)
     page.keyboard.press("Enter")
     page.wait_for_timeout(2500)
     try:
-        tag = box.evaluate("e => e.tagName")
-        val = box.input_value(timeout=3_000) if tag != "DIV" else box.inner_text()
-        if val.strip():
+        if _box_value(box).strip():
+            # Enter не отправил (например, contenteditable) — жмём кнопку
             for btn_name in ("Отправить", "Send"):
                 btn = page.get_by_text(btn_name, exact=True)
                 if btn.count():
                     btn.first.click(delay=random.randint(60, 120))
                     page.wait_for_timeout(2000)
                     break
+    except Exception:
+        log.warning("send_reply: не смог проверить поле после Enter")
+    try:
+        if _box_value(box).strip():
+            log.error("send_reply: текст остался в поле — отправка не подтвердилась")
+            return False
     except Exception:
         pass
     return True

@@ -14,12 +14,11 @@ from __future__ import annotations
 import logging
 import random
 import re
-import time
 
 from playwright.sync_api import BrowserContext, Page, Response
 
 from profi.integration.orders import open_candidate
-from profi.utils.pacing import human_pause
+from profi.utils.pacing import human_pause, type_human
 
 log = logging.getLogger("profi.respond")
 
@@ -118,8 +117,23 @@ def select_tariff(order_page: Page, mode: str) -> None:
 def open_respond_form(
     ctx: BrowserContext, feed_page: Page, order_id: str, mode: str = "pay"
 ) -> Page:
-    """Открыть заказ и форму отклика (без заполнения)."""
+    """Открыть заказ и форму отклика (без заполнения).
+
+    При неудаче (гейт/тарифы/модалка) вкладка заказа закрывается сама —
+    раньше утекала открытой (ревью P2).
+    """
     order_page, _captured = open_candidate(ctx, feed_page, order_id)
+    try:
+        return _open_respond_form_inner(order_page, mode)
+    except Exception:
+        try:
+            order_page.close(run_before_unload=False)
+        except Exception:
+            pass
+        raise
+
+
+def _open_respond_form_inner(order_page: Page, mode: str) -> Page:
     if order_page.get_by_test_id(TARIFFS_BLOCK_TESTID).count() == 0:
         _pass_suit_gate(order_page)
     if order_page.get_by_test_id(TARIFFS_BLOCK_TESTID).count() == 0:
@@ -139,26 +153,6 @@ def open_respond_form(
     return order_page
 
 
-def _type_human(page: Page, locator, text: str, clear: bool = False) -> None:
-    """Посимвольный ввод чанками по 3–9 символов, паузы 0.15–0.6 с (RULES §1).
-
-    clear=True: тройной клик выделяет уже подставленное сайтом значение
-    (инцидент #92799459: дефолтные 2000 + наши 2000 = «20002000»),
-    печать поверх выделения его заменяет. На пустом поле безвредно.
-    """
-    if clear:
-        locator.click(click_count=3, delay=random.randint(50, 110))
-    else:
-        locator.click(delay=random.randint(50, 110))
-    i = 0
-    while i < len(text):
-        chunk = text[i : i + random.randint(3, 9)]
-        page.keyboard.type(chunk, delay=random.randint(45, 110))
-        i += len(chunk)
-        if i < len(text):
-            time.sleep(random.uniform(0.15, 0.6))
-
-
 def fill_form(order_page: Page, rate: int, text: str) -> dict:
     """Заполнить stavka + comments4client. Единица «час» — дефолт, не трогаем."""
     win = order_page.get_by_test_id(BID_WINDOW_TESTID).first
@@ -171,14 +165,14 @@ def fill_form(order_page: Page, rate: int, text: str) -> dict:
     # stavka — числовой INPUT (первый input в окне); сайт может подставить
     # своё значение — тройной клик выделяет его, ввод заменяет
     stavka = inputs.first
-    _type_human(order_page, stavka, str(rate), clear=True)
+    type_human(order_page, stavka, str(rate), clear=True)
     got = (stavka.input_value(timeout=3_000) or "").strip()
     if got != str(rate):
         raise RespondError(
             f"поле ставки после ввода {got!r}, ожидалось {rate!r} — отправка отменена"
         )
     human_pause(0.7, 1.6)
-    _type_human(order_page, textarea, text, clear=True)
+    type_human(order_page, textarea, text, clear=True)
 
     # даём UI пересчитать цену
     order_page.wait_for_timeout(1500)

@@ -1,4 +1,5 @@
 """Адресат сообщения: родитель или сам ученик (main._recipient_hint)."""
+
 from profi.main import _recipient_hint
 
 
