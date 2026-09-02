@@ -153,25 +153,52 @@ def _open_respond_form_inner(order_page: Page, mode: str) -> Page:
     return order_page
 
 
-def fill_form(order_page: Page, rate: int, text: str) -> dict:
-    """Заполнить stavka + comments4client. Единица «час» — дефолт, не трогаем."""
+def _bad_rate_value(win, rate: str) -> str | None:
+    """Первое «плохое» значение среди видимых инпутов bid-окна (или None).
+
+    Инцидент 2026-09-02: input_value() первого инпута возвращал «2000», а на
+    экране стояло «20002000» (rpc 400, отправка не прошла). Проверяем ВСЕ
+    видимые инпуты окна: любой непустой, не равный ставке, — отмена.
+    """
+    for el in win.locator("input:visible").all():
+        try:
+            v = (el.input_value(timeout=2_000) or "").strip()
+        except Exception:
+            continue
+        if v and v != rate:
+            return v
+    return None
+
+
+def fill_form(order_page: Page, rate: int, text: str, mode: str = "pay") -> dict:
+    """Заполнить форму отклика: сообщение + (в pay-режиме) ставку.
+
+    mode="commission": ставку НЕ заполняем (решение владельца 2026-09-02) —
+    при комиссии нет предоплаты, цена занятия обсуждается с клиентом после.
+    Единица «час» — дефолт, не трогаем.
+    """
     win = order_page.get_by_test_id(BID_WINDOW_TESTID).first
-    inputs = win.locator("input")
     textarea = win.locator("textarea").first
     if textarea.count() == 0:
         raise RespondError("textarea сообщения не найдена в форме")
 
-    human_pause(0.6, 1.5)
-    # stavka — числовой INPUT (первый input в окне); сайт может подставить
-    # своё значение — тройной клик выделяет его, ввод заменяет
-    stavka = inputs.first
-    type_human(order_page, stavka, str(rate), clear=True)
-    got = (stavka.input_value(timeout=3_000) or "").strip()
-    if got != str(rate):
-        raise RespondError(
-            f"поле ставки после ввода {got!r}, ожидалось {rate!r} — отправка отменена"
-        )
-    human_pause(0.7, 1.6)
+    if mode != "commission":
+        human_pause(0.6, 1.5)
+        # stavka — числовой INPUT; сайт может подставить своё значение —
+        # тройной клик + Cmd/Ctrl+A выделяют его, ввод заменяет
+        stavka = win.locator("input:visible").first
+        type_human(order_page, stavka, str(rate), clear=True)
+        if _bad_rate_value(win, str(rate)):
+            # самолечение: перенабрать и проверить ещё раз (инцидент
+            # 2026-09-02 «20002000»: первый ввод не заменил подставленное)
+            log.warning("ставка после ввода неверна — перенабираю")
+            type_human(order_page, stavka, str(rate), clear=True)
+        bad = _bad_rate_value(win, str(rate))
+        if bad:
+            raise RespondError(
+                f"поле ставки после ввода {bad!r}, ожидалось {rate!r} — отправка отменена"
+            )
+        human_pause(0.7, 1.6)
     type_human(order_page, textarea, text, clear=True)
 
     # даём UI пересчитать цену
@@ -198,11 +225,13 @@ def read_footer(order_page: Page) -> dict:
     return out
 
 
-def click_send(order_page: Page, ctx: BrowserContext) -> dict:
+def click_send(order_page: Page, ctx: BrowserContext, rate: int | None = None) -> dict:
     """Нажать «Откликнуться» и собрать телеметрию отправки.
 
-    Вызывать ТОЛЬКО с явного разрешения. Ловим RPC /backoffice/api/
+    Вызывать ТОЛЬКО с явным разрешения. Ловим RPC /backoffice/api/
     (claimOrder) и graphql-ответы вокруг клика + итоговый URL.
+    rate — финальный денежный гейт: прямо перед кликом сверяем все видимые
+    поля окна (в commission-режиме передавай None — ставки нет).
     """
     rpc_events: list[str] = []
 
@@ -223,6 +252,16 @@ def click_send(order_page: Page, ctx: BrowserContext) -> dict:
             )
         if btn.count() == 0:
             raise RespondError("кнопка «Откликнуться» не найдена")
+        if rate is not None:
+            human_pause(0.3, 0.8)
+            bad = _bad_rate_value(order_page.get_by_test_id(BID_WINDOW_TESTID).first, str(rate))
+            if bad:
+                log.error(
+                    "ОТМЕНА перед кликом: в форме %r вместо %r — платную кнопку не жму",
+                    bad,
+                    rate,
+                )
+                raise RespondError(f"мусор в форме перед отправкой: {bad!r}")
         human_pause(1.5, 3.0)
         btn.first.click(delay=random.randint(80, 160))
         order_page.wait_for_timeout(6000)

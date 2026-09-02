@@ -290,7 +290,7 @@ def run_respond(order_id: str, rate: int, text: str, send: bool) -> int:
         except (OrderOpenError, respond_mod.RespondError) as e:
             log.error("форма отклика #%s не открылась: %s", order_id, e)
             return 1
-        footer = respond_mod.fill_form(order_page, rate, text)
+        footer = respond_mod.fill_form(order_page, rate, text, mode=config.RESPOND_MODE)
         log.info(
             "форма заполнена: к оплате=%s баланс=%s кнопка=%s",
             footer.get("to_pay"),
@@ -315,18 +315,10 @@ def run_respond(order_id: str, rate: int, text: str, send: bool) -> int:
             order_page.close(run_before_unload=False)
             return 0
 
-        if footer.get("to_pay") is None:
-            log.error("не смог прочитать «К оплате» — отмена отправки")
-            order_page.close(run_before_unload=False)
-            return 1
-
-        # денежные предохранители (RULES.md §2, ревью P0-2)
-        if footer["to_pay"] > config.MAX_RESPONSE_PRICE_RUB:
-            log.error(
-                "ОТМЕНА: к оплате %s ₽ > потолка %s ₽ (MAX_RESPONSE_PRICE_RUB)",
-                footer["to_pay"],
-                config.MAX_RESPONSE_PRICE_RUB,
-            )
+        # денежные предохранители (RULES.md §2); для комиссии предоплаты нет
+        to_pay, why = _payment_due(config.RESPOND_MODE, footer)
+        if to_pay is None:
+            log.error("ОТМЕНА: %s", why)
             time.sleep(1.5)
             order_page.close(run_before_unload=False)
             return 1
@@ -341,8 +333,9 @@ def run_respond(order_id: str, rate: int, text: str, send: bool) -> int:
             order_page.close(run_before_unload=False)
             return 1
 
-        log.warning("ОТПРАВЛЯЮ ПЛАТНЫЙ ОТКЛИК #%s (к оплате %s ₽)…", order_id, footer["to_pay"])
-        outcome = respond_mod.click_send(order_page, ctx)
+        kind = "КОМИССИОННЫЙ" if config.RESPOND_MODE == "commission" else "ПЛАТНЫЙ"
+        log.warning("ОТПРАВЛЯЮ %s ОТКЛИК #%s (к оплате %s ₽)…", kind, order_id, to_pay)
+        outcome = respond_mod.click_send(order_page, ctx, rate=None if config.RESPOND_MODE == "commission" else rate)
         shot2 = out_dir / f"{order_id}_{stamp}_after.png"
         order_page.screenshot(path=str(shot2), full_page=True)
         log.info("исход: url=%s rpc=%s", outcome.get("url_after"), outcome.get("rpc"))
@@ -361,6 +354,9 @@ def run_respond(order_id: str, rate: int, text: str, send: bool) -> int:
         else:
             status = "unknown"
         store.set_send_status(order_id, status)
+        if status in ("sent", "unknown"):
+            # денежная аналитика: что реально списалось (комиссия = 0 вперёд)
+            store.record_response(order_id, config.RESPOND_MODE, to_pay)
         log.info("send_status=%s | скриншоты: %s, %s", status, shot.name, shot2.name)
         return 0 if ok else 1
     finally:
@@ -463,6 +459,25 @@ def _start_worker() -> None:
         )
     cmd = os.environ.get("PROFI_WORKER_START_CMD", default_cmd)
     subprocess.Popen(["/bin/bash", "-c", cmd], start_new_session=True)
+
+
+def _payment_due(mode: str, footer: dict) -> tuple[int | None, str]:
+    """Сколько спишется при отправке: (сумма, "") или (None, причина-отмена).
+
+    pay: «К оплате» обязателен и ≤ потолка (RULES.md §2). commission:
+    предоплаты нет — «К оплате» быть не должно (None/0); число > 0 значит,
+    тариф выбран неверно — отменяемся.
+    """
+    to_pay = footer.get("to_pay")
+    if mode == "commission":
+        if to_pay:
+            return None, f"режим комиссии, а к оплате {to_pay} ₽ — тариф выбран неверно"
+        return 0, ""
+    if to_pay is None:
+        return None, "не смог прочитать «К оплате»"
+    if to_pay > config.MAX_RESPONSE_PRICE_RUB:
+        return None, f"к оплате {to_pay} ₽ > потолка {config.MAX_RESPONSE_PRICE_RUB} ₽"
+    return to_pay, ""
 
 
 def _load_persona() -> str:
@@ -1063,15 +1078,18 @@ def run_cli(command: str, order_id: str | None, args_text: str | None = None) ->
                 print("статистики пока нет")
                 return 0
             sent = [r for r in rows if r["send_status"] == "sent"]
-            spent = sum(r["bid_price"] or 0 for r in sent)
-            print(f"{'заказ':<10} {'статус':<8} {'₽':<5} {'поз':<4} {'отправлен':<17} описание")
+            spent = sum(r["paid"] or 0 for r in sent)
+            print(
+                f"{'заказ':<10} {'статус':<8} {'₽':<5} {'тариф':<5} {'поз':<4} {'отправлен':<17} описание"
+            )
             for r in rows:
                 print(
-                    f"#{r['order_id']:<9} {r['send_status']:<8} {r['bid_price'] or '-':<5} "
-                    f"{r['position'] or '-':<4} {(r['sent_at'] or '')[:16]:<17} "
+                    f"#{r['order_id']:<9} {r['send_status']:<8} {r['paid'] or '-':<5} "
+                    f"{(r['respond_mode'] or '-'):<5} {r['position'] or '-':<4} "
+                    f"{(r['sent_at'] or '')[:16]:<17} "
                     f"{(r['llm_summary'] or r['title'] or '')[:60]}"
                 )
-            print(f"\nитог: отправлено {len(sent)}, потрачено {spent} ₽")
+            print(f"\nитог: отправлено {len(sent)}, потрачено {spent} ₽ (по факту списания)")
             return 0
         if command in ("sent", "skip"):
             if not order_id:
