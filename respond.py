@@ -24,15 +24,101 @@ log = logging.getLogger("profi.respond")
 TARIFFS_BLOCK_TESTID = "orderCard/tariffs"
 BID_WINDOW_TESTID = "bid_window_container"
 PAY_BUTTON_TESTID = "payment_methods_form_pay_button"
+COMMISSION_RE = re.compile("комисси", re.IGNORECASE)
 
 
 class RespondError(Exception):
     pass
 
 
-def open_respond_form(ctx: BrowserContext, feed_page: Page, order_id: str) -> Page:
+SUIT_GATE_TEXT = "Вам подходит этот заказ"
+
+
+def _pass_suit_gate(order_page: Page) -> bool:
+    """Новый гейт на карточке: «Вам подходит этот заказ? Нет / Да».
+
+    Если есть — человеческим кликом жмём «Да» и ждём появления блока тарифов.
+    Возвращает True, если гейт был пройден.
+    """
+    gate = order_page.get_by_text(SUIT_GATE_TEXT, exact=False)
+    if gate.count() == 0:
+        return False
+    human_pause(0.6, 1.4)
+    yes = order_page.get_by_text("Да", exact=True)
+    if yes.count() == 0:
+        raise RespondError("гейт «Вам подходит этот заказ?» есть, а кнопки «Да» нет")
+    yes.first.click(delay=random.randint(70, 150))
+    human_pause(0.8, 1.6)
+    try:
+        order_page.get_by_test_id(TARIFFS_BLOCK_TESTID).first.wait_for(timeout=5_000)
+    except Exception:
+        # новый флоу: после «Да» тарифы не в блоке, а в модалке «Написать клиенту»
+        pass
+    return True
+
+
+WRITE_CLIENT_CTA = "Написать клиенту"
+
+
+def _open_via_write_client(order_page: Page) -> None:
+    """Новый флоу (09.2026): вместо блока тарифов на карточке — CTA
+    «Написать клиенту» → модалка «Выберите тариф» → «Продолжить».
+    В модалке дефолт уже «Комиссия», отдельный выбор не нужен.
+    """
+    cta = order_page.get_by_test_id("order_card_container").get_by_text(
+        WRITE_CLIENT_CTA, exact=False
+    )
+    if cta.count() == 0:
+        raise RespondError("нет ни блока тарифов, ни CTA «Написать клиенту»")
+    human_pause(0.6, 1.2)
+    cta.first.click(delay=random.randint(70, 150))
+    try:
+        cont = order_page.get_by_text("Продолжить", exact=True)
+        cont.first.wait_for(timeout=10_000)
+    except Exception as exc:
+        raise RespondError(f"модалка «Выберите тариф» не появилась: {exc}") from exc
+    human_pause(0.8, 1.6)
+    cont.first.click(delay=random.randint(70, 150))
+
+
+def select_tariff(order_page: Page, mode: str) -> None:
+    """Выбрать тариф отклика в блоке тарифов.
+
+    mode="pay" (дефолт): ничего не делаем — площадка сама подставляет
+    платный тариф отклика. mode="commission": человеческим кликом выбираем
+    карточку «Комиссия»; если её нет/недоступна — RespondError (отправка отменится).
+    """
+    if mode != "commission":
+        return
+    block = order_page.get_by_test_id(TARIFFS_BLOCK_TESTID)
+    if block.count() == 0:
+        raise RespondError("блок тарифов не найден — не могу выбрать «Комиссию»")
+    txt = block.first.inner_text(timeout=5_000)
+    if not COMMISSION_RE.search(txt):
+        raise RespondError(
+            "тариф «Комиссия» недоступен на аккаунте (в блоке только платный отклик). "
+            f"Текст блока: {txt[:200]!r}"
+        )
+    human_pause(0.6, 1.4)
+    card = block.first.get_by_text(COMMISSION_RE).first
+    card.click(delay=random.randint(70, 150))
+    human_pause(0.5, 1.2)
+
+
+def open_respond_form(
+    ctx: BrowserContext, feed_page: Page, order_id: str, mode: str = "pay"
+) -> Page:
     """Открыть заказ и форму отклика (без заполнения)."""
     order_page, _captured = open_candidate(ctx, feed_page, order_id)
+    if order_page.get_by_test_id(TARIFFS_BLOCK_TESTID).count() == 0:
+        _pass_suit_gate(order_page)
+    if order_page.get_by_test_id(TARIFFS_BLOCK_TESTID).count() == 0:
+        # проф.ру убрал блок тарифов: новый флоу через «Написать клиенту»
+        _open_via_write_client(order_page)
+        order_page.get_by_test_id(BID_WINDOW_TESTID).wait_for(timeout=15_000)
+        human_pause(0.5, 1.2)
+        return order_page
+    select_tariff(order_page, mode)
     cta = order_page.get_by_test_id(TARIFFS_BLOCK_TESTID).get_by_text("Продолжить")
     if cta.count() == 0:
         raise RespondError("CTA «Продолжить» не найден в блоке тарифов")

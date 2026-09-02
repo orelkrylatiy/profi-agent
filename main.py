@@ -265,7 +265,7 @@ def run_respond(order_id: str, rate: int, text: str, send: bool) -> int:
             log.error("сессия не READY: %s", state)
             return 2
         ctx = bm._default_context()  # noqa: SLF001
-        order_page = respond_mod.open_respond_form(ctx, bm.page, order_id)
+        order_page = respond_mod.open_respond_form(ctx, bm.page, order_id, config.RESPOND_MODE)
         footer = respond_mod.fill_form(order_page, rate, text)
         log.info("форма заполнена: к оплате=%s баланс=%s кнопка=%s",
                  footer.get("to_pay"), footer.get("balance_seen"), footer.get("send_button_found"))
