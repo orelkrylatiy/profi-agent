@@ -65,7 +65,15 @@ SELECT
     CAST(json_extract(details_json, '$.bid_price') AS INTEGER) AS bid_price,
     json_extract(details_json, '$.competition_position')       AS position,
     length(draft_text)                                          AS text_len,
-    draft_text
+    draft_text,
+    respond_mode,
+    paid_rub,
+    -- что реально заплатили: запись отправки > цена платного тарифа из карточки
+    -- (алиас в этом же SELECT недоступен — повторяем выражение)
+    COALESCE(
+        paid_rub,
+        CAST(json_extract(details_json, '$.bid_price') AS INTEGER)
+    )                                                            AS paid
 FROM candidates;
 """
 
@@ -83,7 +91,20 @@ class Store:
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("PRAGMA busy_timeout=30000")
         self.conn.row_factory = sqlite3.Row
+        # v_responses пересоздаём: CREATE VIEW IF NOT EXISTS не обновляет
+        # определение в живых БД (инцидент: stats без колонки paid)
+        self.conn.execute("DROP VIEW IF EXISTS v_responses")
         self.conn.executescript(SCHEMA)
+        # миграции живых БД: новые колонки добавляем на месте (schema FROM
+        # IF NOT EXISTS не апгрейдит существующие таблицы)
+        for ddl in (
+            "ALTER TABLE candidates ADD COLUMN respond_mode TEXT",
+            "ALTER TABLE candidates ADD COLUMN paid_rub INTEGER",
+        ):
+            try:
+                self.conn.execute(ddl)
+            except sqlite3.OperationalError:  # колонка уже есть
+                pass
         self.conn.commit()
 
     def close(self):
@@ -162,6 +183,16 @@ class Store:
         )
         self.conn.commit()
         return cur.rowcount > 0
+
+    def record_response(self, order_id: str, mode: str, paid_rub: int | None) -> None:
+        """Факт отправки для денежной аналитики: режим тарифа и сколько
+        реально заплатили (комиссия = 0 вперёд, Профи берёт % с занятий)."""
+        self.conn.execute(
+            "UPDATE candidates SET respond_mode = ?, paid_rub = ?, updated_at = ? "
+            "WHERE order_id = ?",
+            (mode, paid_rub, int(time.time()), order_id),
+        )
+        self.conn.commit()
 
     def log_chat(self, order_id: str | None, client_name: str, sender: str, text: str) -> None:
         self.conn.execute(

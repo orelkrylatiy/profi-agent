@@ -112,3 +112,27 @@ class TestChatSystemPersona:
 class TestLockPath:
     def test_lock_is_path(self):
         assert isinstance(main.config.DATA_DIR / "autopilot.lock", Path)
+
+
+class TestPaymentDue:
+    """Гейты оплаты зависят от режима (комиссия: предоплаты нет)."""
+
+    def test_pay_normal(self):
+        assert main._payment_due("pay", {"to_pay": 300}) == (300, "")
+
+    def test_pay_no_to_pay(self):
+        due, why = main._payment_due("pay", {})
+        assert due is None and "К оплате" in why
+
+    def test_pay_over_limit(self, monkeypatch):
+        monkeypatch.setattr(main.config, "MAX_RESPONSE_PRICE_RUB", 500)
+        due, why = main._payment_due("pay", {"to_pay": 501})
+        assert due is None and "потолка" in why
+
+    def test_commission_zero_and_none_ok(self):
+        assert main._payment_due("commission", {"to_pay": 0}) == (0, "")
+        assert main._payment_due("commission", {}) == (0, "")
+
+    def test_commission_with_price_cancels(self):
+        due, why = main._payment_due("commission", {"to_pay": 117})
+        assert due is None and "выбран неверно" in why

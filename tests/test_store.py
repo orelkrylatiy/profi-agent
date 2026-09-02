@@ -104,3 +104,34 @@ def test_wal_mode(tmp_path):
     store = make_store(tmp_path)
     mode = store.conn.execute("PRAGMA journal_mode").fetchone()[0]
     assert mode.lower() == "wal"
+
+
+class TestMoneyFacts:
+    def test_record_response_and_paid(self, tmp_path):
+        store = make_store(tmp_path)
+        store.create_candidate(make_snippet("1"), None, None)
+        store.update_details("1", "ready", '{"bid_price": 300}')
+        store.set_send_status("1", "sent")
+        store.record_response("1", "commission", 0)
+        row = store.conn.execute("SELECT * FROM v_responses WHERE order_id='1'").fetchone()
+        assert row["respond_mode"] == "commission"
+        assert row["paid"] == 0  # комиссия: вперёд не платим
+
+    def test_paid_falls_back_to_bid_price_for_old_rows(self, tmp_path):
+        store = make_store(tmp_path)
+        store.create_candidate(make_snippet("2"), None, None)
+        store.update_details("2", "ready", '{"bid_price": 240}')
+        store.set_send_status("2", "sent")
+        row = store.conn.execute("SELECT * FROM v_responses WHERE order_id='2'").fetchone()
+        assert row["paid"] == 240  # старые отправки: цена из карточки
+
+    def test_migration_adds_columns_to_old_db(self, tmp_path):
+        store = make_store(tmp_path)
+        store.conn.execute("DROP VIEW v_responses")  # вьюха мешает DROP COLUMN
+        store.conn.execute("ALTER TABLE candidates DROP COLUMN respond_mode")
+        store.conn.execute("ALTER TABLE candidates DROP COLUMN paid_rub")
+        store.conn.commit()
+        store.close()
+        store2 = make_store(tmp_path)  # повторное открытие дожимает миграцию
+        cols = {r[1] for r in store2.conn.execute("PRAGMA table_info(candidates)")}
+        assert {"respond_mode", "paid_rub"} <= cols
