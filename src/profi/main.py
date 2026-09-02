@@ -335,7 +335,9 @@ def run_respond(order_id: str, rate: int, text: str, send: bool) -> int:
 
         kind = "КОМИССИОННЫЙ" if config.RESPOND_MODE == "commission" else "ПЛАТНЫЙ"
         log.warning("ОТПРАВЛЯЮ %s ОТКЛИК #%s (к оплате %s ₽)…", kind, order_id, to_pay)
-        outcome = respond_mod.click_send(order_page, ctx, rate=None if config.RESPOND_MODE == "commission" else rate)
+        outcome = respond_mod.click_send(
+            order_page, ctx, rate=None if config.RESPOND_MODE == "commission" else rate
+        )
         shot2 = out_dir / f"{order_id}_{stamp}_after.png"
         order_page.screenshot(path=str(shot2), full_page=True)
         log.info("исход: url=%s rpc=%s", outcome.get("url_after"), outcome.get("rpc"))
