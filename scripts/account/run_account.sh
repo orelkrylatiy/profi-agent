@@ -1,4 +1,5 @@
 #!/bin/bash
+# shellcheck disable=SC1090
 # run_account.sh <account> — универсальный запускатор одного аккаунта.
 export PATH=/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 # Аккаунт = файл accounts/<name>.env (PERSONA, SUBJECTS, CDP_PORT, PROFILE[, READY-флаг]).

@@ -5,9 +5,9 @@
 2 (SNIPPET-поля). Несколько подходящих ответов с одинаковым содержимым —
 не неоднозначность; с разным — FEED_AMBIGUOUS, не угадываем.
 """
+
 from __future__ import annotations
 
-import json
 import logging
 import re
 import time
@@ -137,7 +137,13 @@ def _snippet_from_item(item: dict) -> OrderSnippet:
     else:
         geo_remote, geo_remote_suffix = remote, None
     local = geo.get("local")
-    geo_local = local if isinstance(local, str) else (local or {}).get("prefix") if isinstance(local, dict) else None
+    geo_local = (
+        local
+        if isinstance(local, str)
+        else (local or {}).get("prefix")
+        if isinstance(local, dict)
+        else None
+    )
 
     badges_raw = item.get("badges") or []
     badges = [b.get("id") if isinstance(b, dict) else str(b) for b in badges_raw]

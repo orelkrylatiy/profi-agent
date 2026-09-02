@@ -6,12 +6,12 @@ Read-only по смыслу: одно штатное открытие карто
 
 Запуск: uv run python scripts/probe_order.py <order_id>
 """
+
 from __future__ import annotations
 
 import json
 import sys
 import time
-from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
@@ -38,8 +38,7 @@ def main() -> int:
         browser = p.chromium.connect_over_cdp(CDP)
         ctx = browser.contexts[0]
         feed_page = next(
-            pg for pg in ctx.pages
-            if "profi.ru/backoffice/n.php" in pg.url and "o=" not in pg.url
+            pg for pg in ctx.pages if "profi.ru/backoffice/n.php" in pg.url and "o=" not in pg.url
         )
         try:
             order_page, captured = open_candidate(ctx, feed_page, order_id)
@@ -57,7 +56,7 @@ def main() -> int:
                 path = OUT / f"bo_order_screen_{order_id}_{i}.json"
                 path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
                 print(f"дамп: {path.name}")
-                data = (payload.get("data") or {})
+                data = payload.get("data") or {}
                 print(f"  top keys: {list(data.keys())}")
                 bo = data.get("boOrderScreen")
                 if isinstance(bo, dict):
@@ -68,7 +67,9 @@ def main() -> int:
         # 2) DOM-текст карточки
         dom = extract_dom_texts(order_page)
         text_path = OUT / f"order_text_{order_id}.txt"
-        text_path.write_text(dom.get("container_text") or dom.get("container_error", ""), encoding="utf-8")
+        text_path.write_text(
+            dom.get("container_text") or dom.get("container_error", ""), encoding="utf-8"
+        )
         pos = parse_competition_position(dom.get("container_text"))
         print(f"текст карточки: {text_path.name} ({len(dom.get('container_text') or '')} символов)")
         print(f"позиция отклика по рейтингу: {pos}")

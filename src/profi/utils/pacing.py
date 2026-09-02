@@ -1,4 +1,5 @@
 """Человеческий темп действий (RULES.md §1): паузы и печать."""
+
 from __future__ import annotations
 
 import random

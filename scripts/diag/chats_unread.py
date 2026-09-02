@@ -10,6 +10,7 @@ unread/badge/counter в списке диалогов. Плюс детект «�
   {"ok": false, "error": "..."}   — браузер мёртв и не поднялся
 Exit-код всегда 0 (ошибки внутри ok:false, чтобы не ломать триггер).
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -23,7 +24,14 @@ from playwright.sync_api import sync_playwright
 
 from profi import config
 
-STATE = Path(config.DATA_DIR if hasattr(config, "DATA_DIR") else Path(__file__).resolve().parent.parent / "data") / "chats_state.json"
+STATE = (
+    Path(
+        config.DATA_DIR
+        if hasattr(config, "DATA_DIR")
+        else Path(__file__).resolve().parent.parent / "data"
+    )
+    / "chats_state.json"
+)
 
 
 def out(d: dict) -> None:
@@ -34,14 +42,18 @@ def main() -> int:
     try:
         pw = sync_playwright().start()
         try:
-            browser = pw.chromium.connect_over_cdp(f"http://127.0.0.1:{config.CDP_PORT}", timeout=10_000)
+            browser = pw.chromium.connect_over_cdp(
+                f"http://127.0.0.1:{config.CDP_PORT}", timeout=10_000
+            )
         except Exception:
             out({"ok": False, "error": "cdp_dead"})
             return 0
         ctx = browser.contexts[0]
         page = ctx.new_page()
         try:
-            page.goto("https://profi.ru/backoffice/r.php", wait_until="domcontentloaded", timeout=45_000)
+            page.goto(
+                "https://profi.ru/backoffice/r.php", wait_until="domcontentloaded", timeout=45_000
+            )
             page.wait_for_timeout(4_000)
             html = page.content()
             body = page.locator("body").inner_text(timeout=8_000)
@@ -72,14 +84,16 @@ def main() -> int:
             STATE.write_text(json.dumps({"digest": digest, "ts": int(time.time())}))
 
             unread = max(badge, unread_els)
-            out({
-                "ok": True,
-                "unread": unread,
-                "badge": badge,
-                "unread_els": unread_els,
-                "changed": bool(list_txt) and digest != prev,
-                "list_len": len(list_txt),
-            })
+            out(
+                {
+                    "ok": True,
+                    "unread": unread,
+                    "badge": badge,
+                    "unread_els": unread_els,
+                    "changed": bool(list_txt) and digest != prev,
+                    "list_len": len(list_txt),
+                }
+            )
         finally:
             page.close()
             pw.stop()

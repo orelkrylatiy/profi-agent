@@ -12,6 +12,7 @@
 
 Использование: llm.chat(system="...", user="...") -> str
 """
+
 from __future__ import annotations
 
 import json
@@ -195,8 +196,13 @@ def _chat_anthropic(system: str, user: str, temperature: float, max_tokens: int,
     return "".join(parts)
 
 
-def chat(system: str, user: str, temperature: float = 0.7, max_tokens: int = 900,
-         model: str | None = None) -> str:
+def chat(
+    system: str,
+    user: str,
+    temperature: float = 0.7,
+    max_tokens: int = 900,
+    model: str | None = None,
+) -> str:
     """Один вызов выбранного провайдера. Исключение — при ошибке сети/API."""
     p = provider()
     m = model or _model(p)

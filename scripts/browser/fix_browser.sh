@@ -1,4 +1,5 @@
 #!/bin/bash
+# shellcheck disable=SC1090
 # fix_browser.sh <account> — перезапуск браузера аккаунта (убить зависший, поднять заново).
 # Порт берётся из accounts/<account>.env; профиль — тот же (сессия сохраняется).
 set -u

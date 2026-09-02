@@ -8,6 +8,7 @@
 вызываемый с явного разрешения (main.py respond --send); первый запуск —
 после подтверждения владельцем (RULES.md §2).
 """
+
 from __future__ import annotations
 
 import logging
@@ -17,7 +18,7 @@ import time
 
 from playwright.sync_api import BrowserContext, Page, Response
 
-from profi.integration.orders import OrderOpenError, open_candidate
+from profi.integration.orders import open_candidate
 from profi.utils.pacing import human_pause
 
 log = logging.getLogger("profi.respond")

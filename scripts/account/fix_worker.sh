@@ -1,4 +1,5 @@
 #!/bin/bash
+# shellcheck disable=SC1090
 # fix_worker.sh <account> — перезапуск воркера аккаунта (убить зависший, поднять заново).
 # Свой cmdline не содержит "PROFI_RHYTHM_TAG=<acc>", так что pkill себя не убьёт.
 set -u

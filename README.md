@@ -22,6 +22,7 @@ cd ~/profi
 uv sync
 cp .env.example .env   # вписать ключ (сейчас: Z.AI coding plan, GLM-5.3)
 uv run python -m profi llm-check   # проверка: модель должна ответить
+uv tool install pre-commit && pre-commit install   # хуки: ruff + shellcheck (опционально)
 ```
 
 Chrome — системный, отдельный профиль `data/chrome-profiles/main`,

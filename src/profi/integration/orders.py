@@ -4,20 +4,19 @@
 (настоящие CDP Input-события, isTrusted), никаких page.evaluate-действий;
 человеческие паузы; одна order-вкладка за раз, закрыть после обработки.
 """
+
 from __future__ import annotations
 
-import json
 import logging
 import random
 import re
 import time
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import parse_qs, urlparse
 
 from playwright.sync_api import BrowserContext, Page, Response
 
-from profi.utils.pacing import human_pause
-
 from profi.integration.feed import _operation_name  # noqa: PLW0603 — общий контракт операции
+from profi.utils.pacing import human_pause
 
 log = logging.getLogger("profi.orders")
 
@@ -26,7 +25,6 @@ ORDER_OPERATION = "BoOrderScreen"
 
 class OrderOpenError(Exception):
     pass
-
 
 
 def _is_order_response(resp: Response) -> bool:
@@ -39,7 +37,9 @@ def _is_order_response(resp: Response) -> bool:
         return False
 
 
-def open_candidate(ctx: BrowserContext, feed_page: Page, order_id: str) -> tuple[Page, list[Response]]:
+def open_candidate(
+    ctx: BrowserContext, feed_page: Page, order_id: str
+) -> tuple[Page, list[Response]]:
     """Клик по карточке в ленте → новая вкладка заказа + перехваченные BoOrderScreen.
 
     Слушатель вешается на контекст ДО клика: ответ летит из ещё не
@@ -158,7 +158,9 @@ def extract_full_order(payload: dict, dom_text: str | None) -> dict:
         "description": param_text("Описание"),
         "student": param_text("Ученик"),
         "wishes": param_text("Пожелания"),
-        "address": next((g.get("address", {}).get("addr") for g in geo_entries if g.get("address")), None),
+        "address": next(
+            (g.get("address", {}).get("addr") for g in geo_entries if g.get("address")), None
+        ),
         "client_can_visit": param_text("Клиент может приехать"),
         "remote": param_text("Дистанционно"),
         "created_text": param_text("Детали заказа"),
@@ -178,7 +180,12 @@ def extract_full_order(payload: dict, dom_text: str | None) -> dict:
         "price_hash": slide.get("priceHash"),
         "payment_info": (slide.get("paymentInfo") or {}).get("value"),
         "form_elements": [
-            {"type": e.get("type"), "name": e.get("name"), "label": e.get("label"), "required": e.get("required")}
+            {
+                "type": e.get("type"),
+                "name": e.get("name"),
+                "label": e.get("label"),
+                "required": e.get("required"),
+            }
             for e in slide.get("elements") or []
         ],
         "competition_position": parse_competition_position(dom_text),

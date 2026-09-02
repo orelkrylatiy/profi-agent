@@ -1,4 +1,5 @@
 #!/bin/bash
+# shellcheck disable=SC1090
 # rhythm_keeper.sh — человеческий ритм (generic: все accounts/*.env).
 export PATH=/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 # Гарантированно онлайн с 18:00 МСК; паузы 60–120 мин, макс 2/день, только 01–14 МСК.

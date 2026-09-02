@@ -1,4 +1,5 @@
 """BrowserManager: жизненный цикл Chrome + CDP (спека разд. 5–7)."""
+
 from profi.browser.manager import (
     AUTH_REQUIRED,
     BROWSER_OFFLINE,

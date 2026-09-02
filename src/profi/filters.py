@@ -4,6 +4,7 @@
 а пропускаем дальше: в milestone читателя это видно в логе, ложный SKIP
 дороже лишнего LLM-вызова.
 """
+
 from __future__ import annotations
 
 import re

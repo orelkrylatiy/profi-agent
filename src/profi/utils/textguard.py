@@ -1,4 +1,5 @@
 """Анти-инъекция: контакты/ссылки в текстах для клиента запрещены (RULES.md)."""
+
 from __future__ import annotations
 
 import re

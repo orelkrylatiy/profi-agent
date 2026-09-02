@@ -11,6 +11,7 @@
   uv run python -m profi sent <order_id>  # ручной гейт
   uv run python -m profi skip <order_id>  # ручной гейт
 """
+
 from __future__ import annotations
 
 import argparse
@@ -238,7 +239,9 @@ def run_once() -> int:
         log.info("стартовое состояние: %s", state)
         state = run_cycle(bm, store)
         if state == AUTH_REQUIRED:
-            log.info(">>> Залогинься в Профи.ру в открывшемся Chrome и запусти ещё раз (или луп без --once).")
+            log.info(
+                ">>> Залогинься в Профи.ру в открывшемся Chrome и запусти ещё раз (или луп без --once)."
+            )
             return 2
         return 0 if state == "OK" else 1
     except KeyboardInterrupt:
@@ -254,8 +257,9 @@ def run_respond(order_id: str, rate: int, text: str, send: bool) -> int:
     RULES.md: кастомный текст обязателен; финальный клик только с --send;
     первый реальный отклик — после подтверждения владельцем.
     """
-    from profi.integration import respond as respond_mod
     from datetime import datetime
+
+    from profi.integration import respond as respond_mod
 
     out_dir = config.LOG_DIR / "respond"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -272,8 +276,12 @@ def run_respond(order_id: str, rate: int, text: str, send: bool) -> int:
         ctx = bm._default_context()  # noqa: SLF001
         order_page = respond_mod.open_respond_form(ctx, bm.page, order_id, config.RESPOND_MODE)
         footer = respond_mod.fill_form(order_page, rate, text)
-        log.info("форма заполнена: к оплате=%s баланс=%s кнопка=%s",
-                 footer.get("to_pay"), footer.get("balance_seen"), footer.get("send_button_found"))
+        log.info(
+            "форма заполнена: к оплате=%s баланс=%s кнопка=%s",
+            footer.get("to_pay"),
+            footer.get("balance_seen"),
+            footer.get("send_button_found"),
+        )
         shot = out_dir / f"{order_id}_{stamp}_filled.png"
         order_page.screenshot(path=str(shot), full_page=True)
 
@@ -301,7 +309,8 @@ def run_respond(order_id: str, rate: int, text: str, send: bool) -> int:
         if footer["to_pay"] > config.MAX_RESPONSE_PRICE_RUB:
             log.error(
                 "ОТМЕНА: к оплате %s ₽ > потолка %s ₽ (MAX_RESPONSE_PRICE_RUB)",
-                footer["to_pay"], config.MAX_RESPONSE_PRICE_RUB,
+                footer["to_pay"],
+                config.MAX_RESPONSE_PRICE_RUB,
             )
             time.sleep(1.5)
             order_page.close(run_before_unload=False)
@@ -310,7 +319,8 @@ def run_respond(order_id: str, rate: int, text: str, send: bool) -> int:
         if sent_today >= config.DAILY_SEND_LIMIT:
             log.error(
                 "ОТМЕНА: дневной лимит отправок (%d/%d, DAILY_SEND_LIMIT)",
-                sent_today, config.DAILY_SEND_LIMIT,
+                sent_today,
+                config.DAILY_SEND_LIMIT,
             )
             time.sleep(1.5)
             order_page.close(run_before_unload=False)
@@ -330,7 +340,9 @@ def run_respond(order_id: str, rate: int, text: str, send: bool) -> int:
         url_after = outcome.get("url_after", "")
         ok = "r.php" in url_after and f"id={order_id}" in url_after
         store.set_send_status(order_id, "sent" if ok else "unknown")
-        log.info("send_status=%s | скриншоты: %s, %s", "sent" if ok else "unknown", shot.name, shot2.name)
+        log.info(
+            "send_status=%s | скриншоты: %s, %s", "sent" if ok else "unknown", shot.name, shot2.name
+        )
         return 0 if ok else 1
     finally:
         if order_page is not None:
@@ -399,7 +411,7 @@ def _load_persona() -> str:
             lines = lines[1:]
         return "".join(lines).strip() + " "
     except FileNotFoundError:
-        raise SystemExit(f"персона не найдена: {path}")
+        raise SystemExit(f"персона не найдена: {path}") from None
 
 
 TRIAGE_SYSTEM = (
@@ -470,8 +482,8 @@ def run_chats() -> int:
 def run_chat_auto() -> int:
     """Ответить (LLM) на непрочитанные диалоги. ≤2 за запуск, 1 ответ на диалог,
     не чаще раза в 30 мин на диалог, анти-инъекция, журнал в chat_log."""
-    from profi.integration import chat as chat_mod
     from profi import llm as llm_mod
+    from profi.integration import chat as chat_mod
 
     lock = config.DATA_DIR / "autopilot.lock"
     if lock.exists():
@@ -503,8 +515,9 @@ def run_chat_auto() -> int:
             verdict = None
             for m in llm_mod.models_chain():
                 try:
-                    raw = llm_mod.chat(CHAT_SYSTEM, user_prompt, temperature=0.5,
-                                       max_tokens=1500, model=m)
+                    raw = llm_mod.chat(
+                        CHAT_SYSTEM, user_prompt, temperature=0.5, max_tokens=1500, model=m
+                    )
                     verdict = llm_mod.json_reply(raw)
                     break
                 except Exception as e:
@@ -513,8 +526,9 @@ def run_chat_auto() -> int:
                 print(f"{d['name']}: LLM не дал JSON — пропускаем")
                 continue
             if verdict.get("needs_human"):
-                store.log_chat(order_id, d["name"], "system",
-                               f"NEEDS_HUMAN: {verdict.get('note', '')[:200]}")
+                store.log_chat(
+                    order_id, d["name"], "system", f"NEEDS_HUMAN: {verdict.get('note', '')[:200]}"
+                )
                 print(f"{d['name']}: needs_human — передаём владельцу")
                 continue
             reply = str(verdict.get("reply") or "").strip()
@@ -527,7 +541,7 @@ def run_chat_auto() -> int:
             if len(reply) > 800:
                 cut = max(reply.rfind(c, 0, 800) for c in ".!?")
                 reply = reply[: cut + 1] if cut > 50 else reply[:800]
-            ok = chat_mod.send_reply(page, reply)
+            chat_mod.send_reply(page, reply)
             store.log_chat(order_id, d["name"], "tutor", reply)
             replied.append((d["name"], reply))
             shot = config.LOG_DIR / "chats" / f"auto_{d['name']}_{datetime.now():%H%M}.png"
@@ -595,6 +609,7 @@ def run_autopilot() -> int:
     завершается молча — ноль холостых расходов.
     """
     from datetime import datetime as _dt
+
     from profi import llm as llm_mod
 
     now = _dt.now()
@@ -620,7 +635,9 @@ def run_autopilot() -> int:
             if not rows:
                 return 0
             if not llm_mod.status()["key_masked"]:
-                log.info("autopilot: есть кандидаты (%d), но LLM-ключ не задан — пропускаю", len(rows))
+                log.info(
+                    "autopilot: есть кандидаты (%d), но LLM-ключ не задан — пропускаю", len(rows)
+                )
                 return 0
 
             for row in rows:
@@ -634,7 +651,10 @@ def run_autopilot() -> int:
                 # жёсткие проверки до LLM
                 if bid_price > config.MAX_RESPONSE_PRICE_RUB:
                     store.set_send_status(order_id, "skipped")
-                    store.set_note(order_id, f"скип: цена отклика {bid_price} ₽ > {config.MAX_RESPONSE_PRICE_RUB}")
+                    store.set_note(
+                        order_id,
+                        f"скип: цена отклика {bid_price} ₽ > {config.MAX_RESPONSE_PRICE_RUB}",
+                    )
                     continue
                 if position is not None and position > 20:
                     store.set_send_status(order_id, "skipped")
@@ -687,7 +707,9 @@ def run_autopilot() -> int:
                     store.set_send_status(order_id, "skipped")
                     store.set_note(order_id, "скип: постчек нашёл контакты/ссылку в тексте LLM")
                     with open(config.LOG_DIR / "autopilot.log", "a", encoding="utf-8") as f:
-                        f.write(f"{now:%Y-%m-%d %H:%M} #{order_id} INJECTION_GUARD: текст отвергнут\n")
+                        f.write(
+                            f"{now:%Y-%m-%d %H:%M} #{order_id} INJECTION_GUARD: текст отвергнут\n"
+                        )
                     continue
                 # длина: режем только по границе предложения, иначе скип
                 if len(text) > 500:
@@ -751,7 +773,9 @@ def run_autopilot() -> int:
                     )
                     store.conn.commit()
                 with open(config.LOG_DIR / "autopilot.log", "a", encoding="utf-8") as f:
-                    f.write(f"{now:%Y-%m-%d %H:%M} #{order_id} send={'ok' if sent else 'fail'}: {reason}\n")
+                    f.write(
+                        f"{now:%Y-%m-%d %H:%M} #{order_id} send={'ok' if sent else 'fail'}: {reason}\n"
+                    )
                 continue  # кандидат обработан (sent или error); идём дальше
             return 0
         finally:
@@ -823,18 +847,37 @@ def run_cli(command: str, order_id: str | None, args_text: str | None = None) ->
 def main() -> int:
     parser = argparse.ArgumentParser(description="Контур A: воркер откликов Профи.ру", prog="profi")
     parser.add_argument(
-        "command", nargs="?",
-        choices=["sent", "skip", "candidates", "fetch-details", "respond", "note", "stats",
-                 "autopilot", "llm-check", "chats", "chat-auto"],
+        "command",
+        nargs="?",
+        choices=[
+            "sent",
+            "skip",
+            "candidates",
+            "fetch-details",
+            "respond",
+            "note",
+            "stats",
+            "autopilot",
+            "llm-check",
+            "chats",
+            "chat-auto",
+        ],
     )
     parser.add_argument("order_id", nargs="?")
     parser.add_argument("--once", action="store_true", help="один цикл вместо бесконечного лупа")
     parser.add_argument("--cycles", type=int, default=None, help="остановиться после N циклов")
     parser.add_argument("--rate", type=int, default=None, help="ставка ₽/час для формы отклика")
-    parser.add_argument("--text", default=None, help="кастомный текст отклика (первый ответ клиенту)")
-    parser.add_argument("--send", action="store_true",
-                        help="РЕАЛЬНО нажать «Откликнуться» (платно!); без флага — только заполнить форму")
-    parser.add_argument("--model", default=None, help="модель для llm-check (переопределяет LLM_MODEL)")
+    parser.add_argument(
+        "--text", default=None, help="кастомный текст отклика (первый ответ клиенту)"
+    )
+    parser.add_argument(
+        "--send",
+        action="store_true",
+        help="РЕАЛЬНО нажать «Откликнуться» (платно!); без флага — только заполнить форму",
+    )
+    parser.add_argument(
+        "--model", default=None, help="модель для llm-check (переопределяет LLM_MODEL)"
+    )
     args = parser.parse_args()
 
     setup_logging()

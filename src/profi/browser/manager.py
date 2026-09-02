@@ -4,6 +4,7 @@
 Chrome — внешний процесс, воркер только подключается по CDP и не убивает его
 при выходе. Автологина нет: если сессии нет — AUTH_REQUIRED и ждём человека.
 """
+
 from __future__ import annotations
 
 import logging
@@ -99,7 +100,9 @@ class BrowserManager:
 
     def _launch_and_connect(self) -> Browser | None:
         config.USER_DATA_DIR.mkdir(parents=True, exist_ok=True)
-        log.info("запускаю Chrome: user-data-dir=%s, CDP :%s", config.USER_DATA_DIR, config.CDP_PORT)
+        log.info(
+            "запускаю Chrome: user-data-dir=%s, CDP :%s", config.USER_DATA_DIR, config.CDP_PORT
+        )
         self._chrome_proc = subprocess.Popen(
             [
                 config.CHROME_PATH,
@@ -167,7 +170,9 @@ class BrowserManager:
             # редирект на логин/авторизацию или уход со страницы ленты
             if not self._login_hint_shown:
                 log.info("вкладка не на ленте (%s) — вероятно, нужна авторизация", url)
-                log.info(">>> Залогинься в Профи.ру в открывшемся Chrome — воркер подхватит сессию сам.")
+                log.info(
+                    ">>> Залогинься в Профи.ру в открывшемся Chrome — воркер подхватит сессию сам."
+                )
                 self._login_hint_shown = True
             return AUTH_REQUIRED
         return READY

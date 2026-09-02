@@ -6,11 +6,11 @@
 
 Запуск: uv run python scripts/probe_form.py <order_id>
 """
+
 from __future__ import annotations
 
 import sys
 import time
-from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
@@ -32,8 +32,7 @@ def main() -> int:
         browser = p.chromium.connect_over_cdp(CDP)
         ctx = browser.contexts[0]
         feed_page = next(
-            pg for pg in ctx.pages
-            if "profi.ru/backoffice/n.php" in pg.url and "o=" not in pg.url
+            pg for pg in ctx.pages if "profi.ru/backoffice/n.php" in pg.url and "o=" not in pg.url
         )
 
         # баланс из шапки бэкофиса (read-only)
@@ -68,8 +67,10 @@ def main() -> int:
                 for i in range(n):
                     try:
                         el = loc.nth(i)
-                        print(f"  {sel}[{i}] tag={el.evaluate('e => e.tagName')!r} "
-                              f"text={el.inner_text(timeout=500)[:40]!r}")
+                        print(
+                            f"  {sel}[{i}] tag={el.evaluate('e => e.tagName')!r} "
+                            f"text={el.inner_text(timeout=500)[:40]!r}"
+                        )
                     except Exception:
                         pass
             time.sleep(1.5)
@@ -91,8 +92,10 @@ def main() -> int:
             print("--- инпуты формы ---")
             for inp in bid_window.locator("input, textarea").all():
                 try:
-                    print(f"  <{inp.evaluate('e => e.tagName')}> name={inp.evaluate('e => e.name')!r} "
-                          f"placeholder={inp.evaluate('e => e.placeholder')!r}")
+                    print(
+                        f"  <{inp.evaluate('e => e.tagName')}> name={inp.evaluate('e => e.name')!r} "
+                        f"placeholder={inp.evaluate('e => e.placeholder')!r}"
+                    )
                 except Exception:
                     pass
         elif dialog.count():

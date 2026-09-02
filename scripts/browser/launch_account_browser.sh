@@ -1,4 +1,5 @@
 #!/bin/bash
+# shellcheck disable=SC1090
 # launch_account_browser.sh <account> — generic запуск Chrome для аккаунта
 set -u
 ACC="${1:?usage: launch_account_browser.sh <account>}"
@@ -9,6 +10,8 @@ case "${PROFI_CHROME_PROFILE:-}" in
   /*) ;;
   *)  PROFI_CHROME_PROFILE="$BASE/$PROFI_CHROME_PROFILE" ;;
 esac
+# shellcheck disable=SC2012  # glob по фиксированному пути, ls корректен
+# shellcheck disable=SC2012
 CHROME=$(ls -d /root/.cache/ms-playwright/chromium-*/chrome-linux*/chrome 2>/dev/null | tail -1)
 exec "$CHROME" --headless=new --no-sandbox --disable-dev-shm-usage \
   --remote-debugging-port="${PROFI_CDP_PORT}" \

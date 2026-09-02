@@ -3,6 +3,7 @@
 Спека: разд. 13 (dedup/idempotency), 17 (candidates), 18 (статусы),
 25 (lifecycle). Схема не «богаче» спеки без причины.
 """
+
 from __future__ import annotations
 
 import json

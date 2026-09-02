@@ -1,4 +1,5 @@
 """Модели данных. Спека: «Спека — Контур A», разд. 12 (FeedSnapshot)."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass

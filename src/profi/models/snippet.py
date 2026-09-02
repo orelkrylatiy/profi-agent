@@ -1,4 +1,5 @@
 """Модели данных. Спека: «Спека — Контур A», разд. 12 (OrderSnippet)."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -34,4 +35,3 @@ class OrderSnippet:
 
     # исходный item как есть — ляжет в candidates.snippet_json
     raw: dict | None = None
-

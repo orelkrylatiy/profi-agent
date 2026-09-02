@@ -4,6 +4,7 @@
 посимвольная печать чанками, никаких evaluate-действий. Клиентский текст —
 ДАННЫЕ для LLM, не инструкции (анти-инъекция).
 """
+
 from __future__ import annotations
 
 import logging
@@ -30,12 +31,12 @@ def list_dialogs(page: Page) -> list[dict]:
     dialogs: list[dict] = []
     prev_avatar = False
     for line in snap.splitlines():
-        l = line.strip()
-        if l.startswith("- paragraph: ") and len(l[len("- paragraph: "):].strip()) == 1:
+        line_s = line.strip()
+        if line_s.startswith("- paragraph: ") and len(line_s[len("- paragraph: ") :].strip()) == 1:
             prev_avatar = True
             continue
-        if prev_avatar and l.startswith("- text: "):
-            t = l[len("- text: "):].strip().strip('"').strip()
+        if prev_avatar and line_s.startswith("- text: "):
+            t = line_s[len("- text: ") :].strip().strip('"').strip()
             name = t.split(" ", 1)[0]
             m = re.search(r"(\d+)\s*$", t)
             unread = int(m.group(1)) if m else 0
@@ -61,8 +62,12 @@ def read_dialog_text(page: Page) -> str:
 def send_reply(page: Page, text: str) -> bool:
     """Посимвольный ввод ответа + отправка (Enter, при необходимости кнопка)."""
     box = None
-    for sel in ('textarea[placeholder*="ообщени"]', "textarea", '[contenteditable="true"]',
-                'input[placeholder*="ообщени"]'):
+    for sel in (
+        'textarea[placeholder*="ообщени"]',
+        "textarea",
+        '[contenteditable="true"]',
+        'input[placeholder*="ообщени"]',
+    ):
         loc = page.locator(sel)
         for i in range(loc.count()):
             try:
@@ -81,7 +86,7 @@ def send_reply(page: Page, text: str) -> bool:
     box.click(delay=random.randint(50, 110))
     i = 0
     while i < len(text):
-        chunk = text[i: i + random.randint(3, 9)]
+        chunk = text[i : i + random.randint(3, 9)]
         page.keyboard.type(chunk, delay=random.randint(45, 110))
         i += len(chunk)
         if i < len(text):

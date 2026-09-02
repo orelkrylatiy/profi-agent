@@ -3,6 +3,7 @@
 Read-only. Печатаем для каждого /graphql: method, query-параметры,
 первые 200 символов тела запроса и первые 120 символов ответа.
 """
+
 from __future__ import annotations
 
 import sys
@@ -19,7 +20,9 @@ def main() -> None:
     with sync_playwright() as p:
         browser = p.chromium.connect_over_cdp(CDP)
         ctx = browser.contexts[0]
-        page = next(pg for pg in ctx.pages if "profi.ru/backoffice/n.php" in pg.url and "o=" not in pg.url)
+        page = next(
+            pg for pg in ctx.pages if "profi.ru/backoffice/n.php" in pg.url and "o=" not in pg.url
+        )
         print(f"вкладка: {page.url}")
         t0 = time.monotonic()
 
@@ -30,7 +33,9 @@ def main() -> None:
                     return
                 req = resp.request
                 body = req.post_data or ""
-                print(f"\n+{time.monotonic()-t0:5.1f}s {req.method} {resp.status} qs={url.query[:80]!r}")
+                print(
+                    f"\n+{time.monotonic() - t0:5.1f}s {req.method} {resp.status} qs={url.query[:80]!r}"
+                )
                 print(f"   body[:200]: {body[:200]!r}")
                 try:
                     j = resp.json()
