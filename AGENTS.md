@@ -51,7 +51,8 @@ src/profi/          — пакет (ставится через uv sync, editabl
 personas/           — промпты персон (info.md, lang.md)
 accounts/           — <acc>.env (персона, порт, профиль, субъекты) + <acc>.ready
 scripts/            — точки входа планировщиков: rhythm_keeper.sh (VPS cron),
-                      autopilot_cron.sh (Mac launchd)
+                      autopilot_cron.sh (Mac launchd), chat_cron.sh (Mac launchd
+                      com.profi.chats, 4 мин: chats_unread.py → chat-auto)
   account/          — run_account.sh <acc>, fix_worker.sh <acc>
   browser/          — start-chrome.sh (Mac), chrome-vps.sh, launch_account_browser.sh,
                       fix_browser.sh <acc>

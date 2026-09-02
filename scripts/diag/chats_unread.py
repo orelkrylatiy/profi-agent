@@ -1,12 +1,13 @@
 """Дешёвая проверка чатов r.php без LLM (zero-token).
 
 Read-only: своя вкладка, читаем DOM, закрываем.
-Ищет признаки непрочитанных: бейдж-счётчик у пункта «Чаты», классы
-unread/badge/counter в списке диалогов. Плюс детект «список изменился»
-через state-файл (hash текста списка).
+Непрочитанные считаем ТОЛЬКО по карточкам диалогов (счётчик перед временем).
+Число рядом с «Чаты» в навигации — баланс кошелька, НЕ трогаем (был баг:
+582 ₽ принимались за 582 непрочитанных).
+Плюс детект «список изменился» через state-файл (hash текста секции).
 
 Выход: одна строка JSON на stdout:
-  {"unread": N, "chats": M, "changed": true|false, "ok": true}
+  {"unread": N, "dialogs": M, "names": [...], "changed": true|false, "ok": true}
   {"ok": false, "error": "..."}   — браузер мёртв и не поднялся
 Exit-код всегда 0 (ошибки внутри ok:false, чтобы не ломать триггер).
 """
@@ -55,24 +56,36 @@ def main() -> int:
                 "https://profi.ru/backoffice/r.php", wait_until="domcontentloaded", timeout=45_000
             )
             page.wait_for_timeout(4_000)
-            html = page.content()
             body = page.locator("body").inner_text(timeout=8_000)
 
-            # 1) бейдж у пункта «Чаты» в навигации: число рядом
-            badge = 0
-            m = re.search(r"Чаты[^\d]{0,20}(\d{1,3})\b", body)
-            if m:
-                badge = int(m.group(1))
+            # Живой факт лэйаута (2026-09-02): навигация «Заказы ⏎ Чаты ⏎ 582 ₽ ⏎
+            # Анкета ⏎ Поддержка» — число рядом с «Чаты» это БАЛАНС КОШЕЛЬКА,
+            # а не непрочитанные. Считаем непрочитанные только по карточкам
+            # диалогов: «<буква-аватар> ⏎ ⏎ <имя> ⏎ <превью> ⏎ <счётчик> ⏎ <время>».
+            # Время бывает: 20:51, Вчера, Вт (день недели), 2 окт — превью
+            # любой длины (был баг: длинные превью роняли весь матч строки),
+            # день недели с ЗАГЛАВНОЙ буквы (был баг: «Вт» не брался классом
+            # [а-яё] — заглавная кириллица живёт в другом диапазоне).
+            rows = re.findall(
+                r"\n([А-ЯЁA-Z])\n\n([^\n]{1,60})\n([^\n]*)\n(\d{1,3})\n"
+                r"(\d{1,2}:\d{2}|[Вв]чера|[Сс]егодня|[А-Яа-яёЁ]{1,2}|\d{1,2}\s[А-Яа-яёЁ]{2,3})\n",
+                body,
+            )
+            counters_unread = sum(1 for r in rows if int(r[3]) > 0)
 
-            # 2) классы unread/badge в списке диалогов
-            unread_els = len(re.findall(r'class="[^"]*(?:unread|is-unread|badge)[^"]*"', html))
+            # Второй сигнал: бейдж у пункта «Чаты» в навигации. Бейдж стоит
+            # ПЕРЕД именем пункта («1 ⏎ Поддержка»), число после «Чаты» —
+            # это баланс кошелька, его не трогаем. Бейдж Чатов сейчас пуст,
+            # но при непрочитанных появится — ловим на будущее.
+            m = re.search(r"(?:^|\n)(\d{1,3})\nЧаты\n", body)
+            badge_chats = int(m.group(1)) if m else 0
 
-            # 3) список диалогов — секция после «Чаты» до «Анкета/Поддержка»
-            list_txt = ""
-            m2 = re.search(r"Чаты\n(.*?)(?:Анкета|Поддержка)", body, re.S)
-            if m2:
-                list_txt = m2.group(1).strip()
-            digest = hashlib.sha256(list_txt.encode()).hexdigest()[:16]
+            unread = max(counters_unread, badge_chats)
+
+            # digest секции контента (после навигации) — «список изменился»
+            anchor = body.find("Найти заказ")
+            section = body[anchor:] if anchor != -1 else body[-2000:]
+            digest = hashlib.sha256(section.encode()).hexdigest()[:16]
 
             # state
             prev = None
@@ -83,15 +96,15 @@ def main() -> int:
                     pass
             STATE.write_text(json.dumps({"digest": digest, "ts": int(time.time())}))
 
-            unread = max(badge, unread_els)
             out(
                 {
                     "ok": True,
                     "unread": unread,
-                    "badge": badge,
-                    "unread_els": unread_els,
-                    "changed": bool(list_txt) and digest != prev,
-                    "list_len": len(list_txt),
+                    "badge": badge_chats,
+                    "dialogs": len(rows),
+                    "names": [r[1] for r in rows][:10],
+                    "changed": bool(section) and digest != prev,
+                    "list_len": len(section),
                 }
             )
         finally:

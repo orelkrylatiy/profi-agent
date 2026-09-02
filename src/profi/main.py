@@ -204,6 +204,15 @@ def run_loop(max_cycles: int | None = None) -> int:
         while True:
             state = run_cycle(bm, store)
             done += 1
+            # Чаты в том же процессе: каждый N-й цикл после успешной ленты.
+            # run_chat_auto сам берёт autopilot.lock (не полезет под автопилот)
+            # и держит все гейты (≤2 ответов за запуск, ≥30 мин на диалог).
+            if state == "OK" and done % config.CHAT_CHECK_EVERY_CYCLES == 0:
+                try:
+                    log.info("чат-чек (цикл %d)", done)
+                    run_chat_auto(ctx=bm.context())
+                except Exception:
+                    log.exception("чат-чек упал — воркер живёт")
             if max_cycles is not None and done >= max_cycles:
                 log.info("отработано %d циклов — выхожу", done)
                 return 0
@@ -682,9 +691,14 @@ def run_chats() -> int:
         pw.stop()
 
 
-def run_chat_auto() -> int:
+def run_chat_auto(ctx=None) -> int:
     """Ответить (LLM) на непрочитанные диалоги. ≤2 за запуск, 1 ответ на диалог,
-    не чаще раза в 30 мин на диалог, анти-инъекция, журнал в chat_log."""
+    не чаще раза в 30 мин на диалог, анти-инъекция, журнал в chat_log.
+
+    ctx — BrowserContext воркера (чат-чек в его цикле): открываем свою вкладку
+    в нём, ибо второй sync-Playwright в том же потоке невозможен. Без ctx —
+    своё лёгкое подключение (launchd chat_cron.sh, standalone-запуск).
+    """
     from profi import llm as llm_mod
     from profi.integration import chat as chat_mod
 
@@ -696,7 +710,10 @@ def run_chat_auto() -> int:
     store = Store(config.DB_PATH)
     replied = []
     try:
-        pw, browser, page = _chat_page()
+        if ctx is not None:
+            page = ctx.new_page()
+        else:
+            pw, browser, page = _chat_page()
         chat_mod.open_chats(page)
         dialogs = chat_mod.list_dialogs(page)
         targets = [d for d in dialogs if d["unread"] > 0][:2]
