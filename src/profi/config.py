@@ -72,9 +72,10 @@ FEED_PATH = "/backoffice/n.php"
 
 # --- Ритм цикла ---
 # Рекон 2026-08-30: ~10 одинаковых запросов за 5 мин = мягкий 403.
-# Рабочий интервал 90–120 с, при 401/403 — пауза 30–60 мин.
-RELOAD_INTERVAL_MIN_S = 90
-RELOAD_INTERVAL_MAX_S = 120
+# 45–60 с = ~6.7 запроса/5мин — ниже порога (владелец ускорил 2026-09-03;
+# было 90–120). При 401/403 — пауза 30–60 мин (AUTH_COOLDOWN_S).
+RELOAD_INTERVAL_MIN_S = int(_get("PROFI_RELOAD_MIN", "45"))
+RELOAD_INTERVAL_MAX_S = int(_get("PROFI_RELOAD_MAX", "60"))
 CAPTURE_WINDOW_S = 8.0  # сколько ждём первый BoSearchBoardItems после reload
 CAPTURE_EXTRA_S = 3.0  # сколько ещё собираем повторы после первого пойманного
 AUTH_WAIT_S = 30  # период проверки, пока ждём ручной логин

@@ -39,7 +39,7 @@ CDD-порт **9333**, запуск `scripts/browser/start-chrome.sh` (идем�
 ## Команды
 
 ```bash
-uv run python -m profi                  # рабочий цикл воркера (90–120 с)
+uv run python -m profi                  # рабочий цикл воркера (45–60 с)
 uv run python -m profi --once           # один цикл
 uv run python -m profi autopilot        # один проход автопилота вручную
 uv run python -m profi llm-check        # живая проверка LLM
