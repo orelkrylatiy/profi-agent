@@ -13,7 +13,7 @@ N-й цикл (`PROFI_CHAT_EVERY`, дефолт 3 ≈ раз в 4.5–6 мин).
 
 ## Текущее состояние: M7 — автономный контур
 
-- воркер `src/profi/main.py` (nohup, цикл 90–120 с, запуск `uv run python -m profi`)
+- воркер `src/profi/main.py` (nohup, цикл 45–60 с, запуск `uv run python -m profi`)
   — лента/фильтры/кандидаты/детали **+ чат-чек каждый N-й цикл**;
 - диспетчер launchd `com.profi.autopilot` (каждые 120 с) → `main.py autopilot`
   — жёсткие гейты → LLM (GLM-5.3) триаж+текст → отправка → `logs/autopilot.log`;
