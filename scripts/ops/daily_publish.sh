@@ -7,6 +7,7 @@ BASE="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 DATE_SPEC="${1:-yesterday}"
 TIMEZONE="${OPS_TIMEZONE:-Asia/Yekaterinburg}"
 BRANCH="${OPS_PUBLISH_BRANCH:-main}"
+PYTHON_BIN="${OPS_PYTHON:-python3}"
 
 cd "$BASE"
 
@@ -31,10 +32,17 @@ if [ -n "$NON_OPS_STAGED" ]; then
   exit 2
 fi
 
+command -v "$PYTHON_BIN" >/dev/null 2>&1 || {
+  echo "ops publish: Python не найден: $PYTHON_BIN" >&2
+  exit 1
+}
+
 # Keep the clean VPS clone current before generating code_revision.
 git pull --ff-only origin "$BRANCH"
 
-REPORT_PATH="$(uv run python scripts/ops/daily_report.py --date "$DATE_SPEC" --timezone "$TIMEZONE")"
+# Collector uses only Python stdlib. Do not run it through uv: daily publishing
+# must not depend on PyPI/DNS or reinstall project/dev dependencies.
+REPORT_PATH="$("$PYTHON_BIN" scripts/ops/daily_report.py --date "$DATE_SPEC" --timezone "$TIMEZONE")"
 if [ ! -f "$REPORT_PATH" ]; then
   echo "ops publish: отчёт не создан: $REPORT_PATH" >&2
   exit 1
