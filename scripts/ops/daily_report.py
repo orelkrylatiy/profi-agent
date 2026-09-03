@@ -13,7 +13,7 @@ import re
 import sqlite3
 import subprocess
 from collections import Counter, defaultdict
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -412,7 +412,7 @@ def build_report(root: Path, target: date, tz: ZoneInfo) -> dict:
     return {
         "schema_version": 1,
         "date": target.isoformat(),
-        "timezone": tz.key,
+        "timezone": getattr(tz, "key", str(tz)),
         "generated_at": datetime.now(tz).isoformat(timespec="seconds"),
         "code_revision": _git_revision(root),
         "privacy": {
@@ -449,7 +449,13 @@ def main() -> int:
     args = parser.parse_args()
 
     root = args.root.resolve()
-    tz = ZoneInfo(args.timezone)
+    try:
+        tz = ZoneInfo(args.timezone)
+    except Exception:
+        if args.timezone == "Asia/Yekaterinburg":
+            tz = timezone(timedelta(hours=5), name="Asia/Yekaterinburg")
+        else:
+            raise
     target = _resolve_date(args.date, tz)
     report = build_report(root, target, tz)
 
