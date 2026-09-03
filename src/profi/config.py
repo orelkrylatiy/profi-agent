@@ -9,6 +9,8 @@
 from __future__ import annotations
 
 import os
+import shlex
+import shutil
 from pathlib import Path
 
 PROJECT_DIR = Path(__file__).resolve().parents[2]  # src/profi/config.py → корень репо
@@ -49,6 +51,23 @@ LOG_TAG = _get("PROFI_LOG_TAG", "").strip()
 WORKER_LOG = LOG_DIR / (f"worker-{LOG_TAG}.log" if LOG_TAG else "worker.log")
 AUTOPILOT_LOG = LOG_DIR / (f"autopilot-{LOG_TAG}.log" if LOG_TAG else "autopilot.log")
 AUTOPILOT_LOCK = DATA_DIR / (f"{LOG_TAG}.autopilot.lock" if LOG_TAG else "autopilot.lock")
+
+# Production account workers на VPS маркируются PROFI_RHYTHM_TAG. Внешний
+# run_account.sh и внутренний restart из autopilot обязаны использовать один
+# и тот же lifetime-lock, иначе после первой платной отправки worker мог быть
+# поднят уже без singleton-защиты.
+RHYTHM_TAG = os.environ.get("PROFI_RHYTHM_TAG", "").strip()
+WORKER_LOCK = DATA_DIR / (f"{RHYTHM_TAG}.worker.lock" if RHYTHM_TAG else "worker.lock")
+if RHYTHM_TAG and shutil.which("flock") and not os.environ.get("PROFI_WORKER_START_CMD"):
+    _project_q = shlex.quote(str(PROJECT_DIR))
+    _lock_q = shlex.quote(str(WORKER_LOCK))
+    _tag_q = shlex.quote(RHYTHM_TAG)
+    _log_q = shlex.quote(str(WORKER_LOG))
+    os.environ["PROFI_WORKER_START_CMD"] = (
+        f"cd {_project_q} && nohup flock -w 15 {_lock_q} "
+        f"env PROFI_RHYTHM_TAG={_tag_q} uv run python -m profi.main "
+        f"--rhythm-tag {_tag_q} >> {_log_q} 2>&1 &"
+    )
 
 # Файл-сигнал «идёт платная отправка»: автопилот ставит его перед открытием
 # формы отклика и снимает после. Воркер на это время пропускает цикл, а
@@ -144,9 +163,13 @@ RATE = 2000  # ставка ₽/час в форме отклика (RULES: ме
 
 # --- Тариф отклика (адаптивность: акк может откликаться платно или через комиссию) ---
 # PROFI_RESPOND_MODE: "pay" (платный отклик, дефолт) | "commission" (через комиссию Profi)
-# При "commission" в блоке тарифов выбирается карточка «Комиссия», если она доступна
-# на аккаунте; иначе отправка отменяется с ошибкой (RULES.md §2).
+# Денежный режим обязан быть fail-closed: опечатка не должна молча превращаться
+# в pay-flow (ветки кода исторически проверяют `mode != "commission"`).
 RESPOND_MODE = _get("PROFI_RESPOND_MODE", "pay").strip().lower()
+if RESPOND_MODE not in {"pay", "commission"}:
+    raise RuntimeError(
+        f"невалидный PROFI_RESPOND_MODE={RESPOND_MODE!r}; разрешены только 'pay' или 'commission'"
+    )
 
 
 # Рабочие часы автопилота (часы локального времени, платные отправки только
