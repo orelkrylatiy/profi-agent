@@ -9,6 +9,8 @@
 from __future__ import annotations
 
 import os
+import shlex
+import shutil
 from pathlib import Path
 
 PROJECT_DIR = Path(__file__).resolve().parents[2]  # src/profi/config.py → корень репо
@@ -49,6 +51,23 @@ LOG_TAG = _get("PROFI_LOG_TAG", "").strip()
 WORKER_LOG = LOG_DIR / (f"worker-{LOG_TAG}.log" if LOG_TAG else "worker.log")
 AUTOPILOT_LOG = LOG_DIR / (f"autopilot-{LOG_TAG}.log" if LOG_TAG else "autopilot.log")
 AUTOPILOT_LOCK = DATA_DIR / (f"{LOG_TAG}.autopilot.lock" if LOG_TAG else "autopilot.lock")
+
+# Production account workers на VPS маркируются PROFI_RHYTHM_TAG. Внешний
+# run_account.sh и внутренний restart из autopilot обязаны использовать один
+# и тот же lifetime-lock, иначе после первой платной отправки worker мог быть
+# поднят уже без singleton-защиты.
+RHYTHM_TAG = os.environ.get("PROFI_RHYTHM_TAG", "").strip()
+WORKER_LOCK = DATA_DIR / (f"{RHYTHM_TAG}.worker.lock" if RHYTHM_TAG else "worker.lock")
+if RHYTHM_TAG and shutil.which("flock") and not os.environ.get("PROFI_WORKER_START_CMD"):
+    _project_q = shlex.quote(str(PROJECT_DIR))
+    _lock_q = shlex.quote(str(WORKER_LOCK))
+    _tag_q = shlex.quote(RHYTHM_TAG)
+    _log_q = shlex.quote(str(WORKER_LOG))
+    os.environ["PROFI_WORKER_START_CMD"] = (
+        f"cd {_project_q} && nohup flock -n {_lock_q} "
+        f"env PROFI_RHYTHM_TAG={_tag_q} uv run python -m profi.main "
+        f"--rhythm-tag {_tag_q} >> {_log_q} 2>&1 &"
+    )
 
 # Файл-сигнал «идёт платная отправка»: автопилот ставит его перед открытием
 # формы отклика и снимает после. Воркер на это время пропускает цикл, а
