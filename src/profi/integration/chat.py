@@ -39,7 +39,15 @@ def list_dialogs(page: Page) -> list[dict]:
             name = t.split(" ", 1)[0]
             m = re.search(r"(\d+)\s*$", t)
             unread = int(m.group(1)) if m else 0
-            dialogs.append({"name": name, "unread": unread, "preview": t[:160]})
+            dialogs.append(
+                {
+                    "name": name,
+                    "unread": unread,
+                    "preview": t[:160],
+                    # последнее слово за нами? (в строке после имени идёт «Вы: …»)
+                    "last_is_ours": t.startswith(f"{name} Вы:"),
+                }
+            )
             prev_avatar = False
             continue
         prev_avatar = False

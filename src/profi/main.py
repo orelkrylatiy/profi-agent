@@ -751,11 +751,21 @@ def run_chat_auto(ctx=None) -> int:
         for d in targets:
             try:
                 order_id = chat_mod.open_dialog_by_name(page, d["name"])
-                # не чаще раза в 30 мин на диалог
+                # Не чаще раза в 30 мин на диалог — ТОЛЬКО если последнее
+                # слово за нами (клиент ещё не ответил). Клиент написал после
+                # нас — это новое сообщение, отвечаем сразу (инцидент Максима
+                # 01:05: «В 18:00 сегодня?» съел лимит, диалог остался
+                # прочитанным — ответ не ушёл до утра).
                 if order_id:
                     last = store.last_chat_sent_at(order_id)
-                    if last and time.time() - last < 30 * 60:
-                        print(f"{d['name']}: наш ответ моложе 30 мин — пропускаем")
+                    if (
+                        last
+                        and time.time() - last < 30 * 60
+                        and d.get("last_is_ours")
+                    ):
+                        print(
+                            f"{d['name']}: ответ моложе 30 мин, последнее слово за нами — ждём клиента"
+                        )
                         continue
                 dialog_text = chat_mod.read_dialog_text(page)
                 user_prompt = (
