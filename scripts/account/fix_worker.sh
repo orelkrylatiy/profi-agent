@@ -11,7 +11,10 @@ pkill -f "profi.main --rhythm-tag $ACC\$" 2>/dev/null; sleep 1
 cd "$BASE" || exit 1
 set -a; . "$BASE/accounts/$ACC.env"; set +a
 WLOCK="$BASE/data/$ACC.worker.lock"
-setsid flock -n "$WLOCK" \
+# После SIGTERM старый worker может несколько секунд закрывать Playwright/SQLite.
+# На forced restart ждём освобождения singleton-lock, а не теряем единственную
+# попытку старта из-за короткого overlap окна.
+setsid flock -w 15 "$WLOCK" \
   env PROFI_RHYTHM_TAG="$ACC" PROFI_PERSONA="$PROFI_PERSONA" \
   PROFI_DB="${PROFI_DB:-$BASE/data/$ACC.db}" \
   PROFI_CHROME_PROFILE="$PROFI_CHROME_PROFILE" PROFI_CDP_PORT="$PROFI_CDP_PORT" \
