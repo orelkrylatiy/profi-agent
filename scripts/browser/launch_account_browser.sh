@@ -16,10 +16,10 @@ case "${PROFI_CHROME_PROFILE:-}" in
 esac
 # shellcheck disable=SC2012  # glob по фиксированному пути, ls корректен
 CHROME=$(ls -d /root/.cache/ms-playwright/chromium-*/chrome-linux*/chrome 2>/dev/null | tail -1)
-[ -n "$CHROME" ] && [ -x "$CHROME" ] || {
+if [ -z "$CHROME" ] || [ ! -x "$CHROME" ]; then
   echo "Chromium Playwright не найден в /root/.cache/ms-playwright" >&2
   exit 1
-}
+fi
 exec "$CHROME" --headless=new --no-sandbox --disable-dev-shm-usage \
   --remote-debugging-port="${PROFI_CDP_PORT}" \
   --user-data-dir="${PROFI_CHROME_PROFILE}" \

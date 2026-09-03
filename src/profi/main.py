@@ -854,9 +854,7 @@ def run_chat_auto(ctx=None) -> int:
         # — наше (в т.ч. ручной ответ владельца, он в превью тоже «Вы: …») —
         # клиент ещё не сказал ничего нового, молчим (инцидент Максима 01:05:
         # «В 18:00 сегодня?» съел 30-мин лимит и остался без ответа до утра).
-        targets = [
-            d for d in dialogs if d["unread"] > 0 and not d.get("last_is_ours")
-        ][:2]
+        targets = [d for d in dialogs if d["unread"] > 0 and not d.get("last_is_ours")][:2]
         print(f"диалогов: {len(dialogs)}, с непрочитанными: {len(targets)}")
         for d in targets:
             try:
@@ -1049,7 +1047,9 @@ def run_autopilot() -> int:
             ).rowcount
             store.conn.commit()
             if stale:
-                log.warning("autopilot: булк-скип %d протухших кандидатов (>%d мин)", stale, max_age_s // 60)
+                log.warning(
+                    "autopilot: булк-скип %d протухших кандидатов (>%d мин)", stale, max_age_s // 60
+                )
             rows = [
                 r
                 for r in rows
@@ -1217,9 +1217,13 @@ def run_autopilot() -> int:
                             (f"open-fail: {str(e)[:200]}", int(time.time()), order_id),
                         )
                         store.conn.commit()
-                        log.warning("#%s: не открылась — остаётся в очереди (%s)", order_id, str(e)[:80])
+                        log.warning(
+                            "#%s: не открылась — остаётся в очереди (%s)", order_id, str(e)[:80]
+                        )
                         with open(config.AUTOPILOT_LOG, "a", encoding="utf-8") as f:
-                            f.write(f"{now:%Y-%m-%d %H:%M} #{order_id} OPEN_FAIL: повтор следующего прохода\n")
+                            f.write(
+                                f"{now:%Y-%m-%d %H:%M} #{order_id} OPEN_FAIL: повтор следующего прохода\n"
+                            )
                         send_failed = True
                         sent = None
                     except Exception as e:

@@ -37,7 +37,14 @@ def dump(page, tag: str, order_id: str) -> None:
     print(f"--- dump {tag} @ {time.strftime('%H:%M:%S')} url={page.url[:90]}")
     q("tariffs testid count", lambda: page.get_by_test_id(TARIFFS_BLOCK_TESTID).count())
     q("gate text count", lambda: page.get_by_text(SUIT_GATE_TEXT, exact=False).count())
-    q("CTA «Написать клиенту»", lambda: page.get_by_test_id("order_card_container").get_by_text(WRITE_CLIENT_CTA, exact=False).count())
+    q(
+        "CTA «Написать клиенту»",
+        lambda: (
+            page.get_by_test_id("order_card_container")
+            .get_by_text(WRITE_CLIENT_CTA, exact=False)
+            .count()
+        ),
+    )
     q("bid_window", lambda: page.get_by_test_id("bid_window_container").count())
     q("«Продолжить» anywhere", lambda: page.get_by_text("Продолжить", exact=True).count())
     q("«Да» buttons", lambda: page.get_by_text("Да", exact=True).count())

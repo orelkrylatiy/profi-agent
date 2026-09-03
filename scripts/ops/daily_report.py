@@ -44,9 +44,7 @@ LOG_EVENT_PATTERNS: dict[str, re.Pattern[str]] = {
 
 LINE_DATE_RE = re.compile(r"^\[?(?P<date>\d{4}-\d{2}-\d{2})[ T]")
 LEVEL_RE = re.compile(r"\b(?P<level>CRITICAL|ERROR|WARNING)\b")
-ACCOUNT_LOG_RE = re.compile(
-    r"^(?:worker|browser|autopilot)-(?P<account>[A-Za-z0-9_.-]+)\.log$"
-)
+ACCOUNT_LOG_RE = re.compile(r"^(?:worker|browser|autopilot)-(?P<account>[A-Za-z0-9_.-]+)\.log$")
 
 
 def _read_env(path: Path) -> dict[str, str]:
@@ -182,10 +180,7 @@ def _groups(conn: sqlite3.Connection, sql: str, params: tuple = ()) -> dict[str,
         rows = conn.execute(sql, params).fetchall()
     except sqlite3.Error:
         return {}
-    return {
-        str(row[0] if row[0] is not None else "unknown"): int(row[1])
-        for row in rows
-    }
+    return {str(row[0] if row[0] is not None else "unknown"): int(row[1]) for row in rows}
 
 
 def _db_metrics(path: Path, start_ts: int, end_ts: int) -> dict:
@@ -396,10 +391,7 @@ def _merge_totals(accounts: dict[str, dict], logs: dict) -> dict:
 def build_report(root: Path, target: date, tz: ZoneInfo) -> dict:
     start_ts, end_ts = _window_epoch(target, tz)
     databases = _discover_databases(root)
-    accounts = {
-        account: _db_metrics(path, start_ts, end_ts)
-        for account, path in databases.items()
-    }
+    accounts = {account: _db_metrics(path, start_ts, end_ts) for account, path in databases.items()}
     logs = _scan_logs(root, target)
 
     per_account_log_events = logs.pop("events_by_account", {})
@@ -431,9 +423,7 @@ def build_report(root: Path, target: date, tz: ZoneInfo) -> dict:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(
-        description="Build privacy-safe daily Profi ops snapshot"
-    )
+    parser = argparse.ArgumentParser(description="Build privacy-safe daily Profi ops snapshot")
     parser.add_argument(
         "--root",
         type=Path,

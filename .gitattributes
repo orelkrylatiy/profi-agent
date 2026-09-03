@@ -1,0 +1,8 @@
+# Shell-скрипты всегда LF: CRLF валит shellcheck в CI (SC1017) и bash на
+# линуксе/маке. Репо ведётся с Windows — без этого правила git кладёт в
+# коммит \r\n и ломает VPS/mac-клоны.
+*.sh text eol=lf
+# Git-хуки без расширения — тоже shell, правило то же (*.sh их не ловит).
+githooks/* text eol=lf
+# Python-файлы тоже держим LF: единый вид на винде/VPS/маке, меньше шума в diff.
+*.py text eol=lf
