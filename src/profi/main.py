@@ -1015,6 +1015,18 @@ def run_autopilot() -> int:
 
         store = Store(config.DB_PATH)
         try:
+            # Дневной лимит исчерпан — дальше триажить бессмысленно: гейт в
+            # run_respond всё равно отменит отправку ПОСЛЕ LLM и заполнения
+            # формы. Останавливаем проход сразу: берегим LLM-квоту (общую с
+            # кодингом) и не дёргаем площадку холостыми открытиями карточек
+            # (кормит tarpit/антибот). Лимиты скинутся в полночь.
+            if config.DAILY_SEND_LIMIT and store.sends_today() >= config.DAILY_SEND_LIMIT:
+                log.info(
+                    "autopilot: дневной лимит отправок %d/%d исчерпан — до полуночи флоу не запускаю",
+                    config.DAILY_SEND_LIMIT,
+                    config.DAILY_SEND_LIMIT,
+                )
+                return 0
             rows = store.conn.execute(
                 "SELECT order_id, details_json, first_seen_at FROM candidates "
                 "WHERE details_status='ready' AND send_status='not_sent' AND draft_status='pending' ORDER BY first_seen_at DESC"
