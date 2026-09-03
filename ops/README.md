@@ -1,99 +1,171 @@
 # Daily ops snapshots
 
-`ops/` contains small **sanitized aggregate reports** that are safe to keep in this public repository and convenient to analyse later through GitHub/ChatGPT.
+`ops/` содержит небольшие **санитизированные агрегированные отчёты**, которые можно безопасно хранить в этом публичном репозитории и потом разбирать через GitHub/ChatGPT.
 
-## Privacy contract
+## Быстрый запуск
 
-The collector uses an allow-list. It never copies raw log lines or free-form database text into the report.
+Collector использует только стандартную библиотеку Python. **`uv run` не нужен** и для генерации отчёта не требуется доступ к PyPI.
 
-The generated JSON must not contain:
+### Windows / PowerShell
 
-- client names or other PII;
-- order ids;
-- chat/application text;
-- raw URLs;
-- cookies, headers, API keys or tokens;
-- raw exceptions/log fragments.
+Из корня репозитория:
 
-Only aggregate counts, technical status names and the code revision are stored.
-
-Because the report is intentionally non-sensitive and must remain readable through GitHub tooling, it is stored as plaintext. **Do not add encrypted raw logs to this directory.** If raw incident context is ever needed, keep it outside Git or move it to a separate protected workflow.
-
-`logs/` and `data/` remain in `.gitignore`. This does not prevent the collector from reading them locally or on the VPS; `.gitignore` only controls what Git tracks.
-
-## Manual report
-
-Today:
-
-```bash
-uv run python scripts/ops/daily_report.py --date today
+```powershell
+python scripts\ops\daily_report.py --date today
 ```
 
-Yesterday:
+За вчера:
 
-```bash
-uv run python scripts/ops/daily_report.py --date yesterday
+```powershell
+python scripts\ops\daily_report.py --date yesterday
 ```
 
-The collector writes:
+Для конкретной даты:
+
+```powershell
+python scripts\ops\daily_report.py --date 2026-09-03
+```
+
+Успешный запуск печатает путь, например:
+
+```text
+ops\daily\2026-09-03.json
+```
+
+Проверить последний отчёт:
+
+```powershell
+Get-Content ops\latest.json
+```
+
+### Linux / VPS
+
+Из корня репозитория:
+
+```bash
+python3 scripts/ops/daily_report.py --date today
+```
+
+За вчера:
+
+```bash
+python3 scripts/ops/daily_report.py --date yesterday
+```
+
+Проверить результат:
+
+```bash
+cat ops/latest.json
+```
+
+Collector создаёт/обновляет два файла:
 
 ```text
 ops/daily/YYYY-MM-DD.json
 ops/latest.json
 ```
 
-Default reporting timezone is `Asia/Yekaterinburg`; override with `--timezone`.
+Часовой пояс по умолчанию — `Asia/Yekaterinburg`. На Windows, где системная IANA timezone database может отсутствовать, для Екатеринбурга используется встроенный fallback UTC+05:00, поэтому устанавливать `tzdata` не требуется.
 
-## Daily publish
+При необходимости можно указать timezone явно:
 
-For a clean VPS clone on `main`:
+```bash
+python3 scripts/ops/daily_report.py --date yesterday --timezone Asia/Yekaterinburg
+```
+
+## Что делать после генерации
+
+Если запускаешь локально и хочешь, чтобы отчёт появился в GitHub:
+
+```bash
+git add ops/daily/YYYY-MM-DD.json ops/latest.json
+git commit -m "ops: daily snapshot YYYY-MM-DD"
+git push
+```
+
+После push можно попросить ChatGPT, например:
+
+```text
+Посмотри ops/latest.json в profi-agent и разбери воронку, расходы и технические проблемы за день.
+```
+
+## Автоматический daily publish на VPS
+
+Для чистого VPS-клона на `main` есть publisher:
 
 ```bash
 bash scripts/ops/daily_publish.sh yesterday
 ```
 
-The publisher:
+Он сам:
 
-1. refuses to run if tracked code/docs changes exist outside `ops/`;
-2. performs `git pull --ff-only`;
-3. generates the previous day's sanitized snapshot;
-4. commits only the daily report and `ops/latest.json`;
-5. pushes the configured branch.
+1. проверяет, что текущая ветка совпадает с `OPS_PUBLISH_BRANCH`;
+2. отказывается работать, если есть tracked-изменения вне `ops/`;
+3. делает `git pull --ff-only`;
+4. запускает collector обычным `python3`, без `uv` и без PyPI;
+5. коммитит только дневной отчёт и `ops/latest.json`;
+6. делает `git push`.
 
-Environment variables:
+Переменные окружения:
 
 ```text
 OPS_TIMEZONE=Asia/Yekaterinburg
 OPS_PUBLISH_BRANCH=main
+OPS_PYTHON=python3
 ```
 
-## Cron example
+Если на машине Python называется иначе, например `python`, можно запустить:
 
-Run once a day after the reporting day has definitely ended. On the current VPS setup, 02:30 is a conservative default:
+```bash
+OPS_PYTHON=python bash scripts/ops/daily_publish.sh yesterday
+```
+
+## Cron
+
+Пример: каждый день в 02:30 собрать и запушить отчёт за вчера:
 
 ```cron
 30 2 * * * cd /root/profi-agent && OPS_TIMEZONE=Asia/Yekaterinburg bash scripts/ops/daily_publish.sh yesterday >> logs/ops-daily.log 2>&1
 ```
 
-If the machine uses another repository path, change only the `cd` part.
+Если репозиторий лежит в другом месте, поменяй только путь после `cd`.
 
-For local development, it is usually better to run `daily_report.py` manually and use `daily_publish.sh` only from a clean clone.
+Для локальной разработки обычно достаточно запускать `daily_report.py` вручную. `daily_publish.sh` рассчитан прежде всего на чистый VPS-клон.
 
-## What is collected
+## Privacy contract
 
-SQLite is the primary source of business metrics:
+Collector работает по allow-list и никогда не копирует в отчёт сырые строки логов или свободный текст из БД.
 
-- new feed orders;
-- candidates created and details loaded;
-- drafts generated;
+В generated JSON не должны попадать:
+
+- имена клиентов и другой PII;
+- order id;
+- тексты чатов или откликов;
+- сырые URL;
+- cookies, headers, API keys и tokens;
+- сырые traceback/exception/log fragments.
+
+Хранятся только агрегированные счётчики, технические статусы и revision кода.
+
+Поскольку отчёт намеренно не содержит чувствительных данных и должен читаться через GitHub/ChatGPT, он хранится в plaintext. **Не добавляй в `ops/` зашифрованные или незашифрованные raw logs.** Если когда-нибудь понадобится сырой incident context, его нужно хранить отдельно от Git.
+
+`logs/` и `data/` остаются в `.gitignore`. Это не мешает collector читать их локально или на VPS: `.gitignore` только запрещает Git отслеживать эти файлы.
+
+## Что собирается
+
+SQLite — основной источник бизнес-метрик:
+
+- новые заказы из feed;
+- созданные candidates и загруженные details;
+- сгенерированные drafts;
 - sent/unknown responses;
 - recorded upfront spend;
 - response modes;
-- tutor chat replies;
-- `needs_human`, chat send failures and injection-guard events;
-- current candidate state/error counters.
+- ответы репетитора в чатах;
+- `needs_human`, chat send failures и injection-guard events;
+- текущие candidate status/error counters.
 
-Logs are used only for counts of known technical signatures, for example:
+Логи используются только для подсчёта заранее разрешённых технических сигнатур, например:
 
 - `FEED_AUTH_COOLDOWN`;
 - `FEED_CAPTURE_ERROR`;
@@ -104,4 +176,4 @@ Logs are used only for counts of known technical signatures, for example:
 - `database is locked`;
 - traceback/tab-hygiene/CDP reconnect/browser-exit events.
 
-No matching source line is persisted in `ops/`.
+Сами совпавшие строки логов в `ops/` не сохраняются.
