@@ -21,6 +21,10 @@
   площадка tarpитит `n.php?o=…` — 45 с и таймаут (все OPEN_FAIL 03.09),
   с referer dcl ≈ 1.5 с. Причина «почему отклики не уходили» найдена.
 - [x] Первый свежий отклик после фиксов: #93471495 (lang, commission) прошёл.
+- [x] Ключ A (`b4ae07…5IoK`) — дефолт для профи-проектов: в root `.env`,
+  primary у info, фолбэк у lang. Ключ B — primary у lang, фолбэк у info.
+- [x] Пуш в GitHub переведён на SSH (https-креды протухли — push зависал
+  в credential-manager молча).
 
 ## Бэклог
 
