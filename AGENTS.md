@@ -24,6 +24,48 @@ bash scripts/browser/fix_browser.sh lang    # починить зависший 
 bash scripts/account/fix_worker.sh info     # перезапустить info-воркер
 ```
 
+## Запуск (локально на Windows, основная схема с 03.09.2026)
+
+Профили Chrome НЕ в репо (публичный GitHub, в профилях живые куки сессий):
+`C:\Users\Maxim\browser-profiles\lol` (акк info, CDP :9223) и
+`...\browser-profiles\avito` (акк lang, CDP :9222).
+
+Порядок ВАЖЕН — сначала браузер, потом воркеры:
+
+```powershell
+# 1. Chrome с CDP (сессия Профи живёт в профиле, перезапуск Chrome её не рвёт)
+powershell ~\browser-scripts\open.ps1 lol      # info
+powershell ~\browser-scripts\open.ps1 avito    # lang
+# 2. Глазами: profi.ru открыт под нужным акком? редирект на вход — залогиниться руками
+# 3. Воркер + автопилот (луп 120 с) по accounts\<акк>.env:
+powershell scripts\start-win.ps1 -Account info
+powershell scripts\start-win.ps1 -Account lang
+```
+
+- **Стоп/рестарт — только через `scripts\stop-win.ps1`** (гасит и python-ы,
+  и Temp-обёртки `profi-worker|profi-loop-<акк>.ps1`; обёртка-луп иначе
+  респавнит автопилот каждые 120 с — получатся дубли). `start-win` НЕ
+  идемпотентен: повторный вызов без stop-win плодит вторую пару процессов.
+- Воркер при старте без CDP завершается (`PROFI_CHROME_NO_LAUNCH=1` —
+  сам Chrome не поднимаем): «Chrome по CDP не найден… жду» и выход.
+  Лечение: поднять Chrome (шаг 1) и снова `start-win` (сначала stop-win).
+- Логи: `logs\worker-<акк>.log` (лента + чат-чек), `logs\autopilot-<акк>.log`
+  (отправки, главный), `logs\loop-<акк>.log` (служебный луп),
+  `logs\respond\*.png` (скриншоты отправок), БД `data\<акк>.db`
+  (таблицы `candidates`, `chat_log`, вьюха `v_responses`).
+- Грабли Windows: `uv sync` на этой машине падает с DNS-ошибкой — запускать
+  `.venv\Scripts\python.exe` c `PYTHONPATH=src` и `PYTHONUTF8=1`; PS 5.1
+  требует UTF-8 с BOM для .ps1 с кириллицей; console-редиректы `*>>` пишут
+  UTF-16.
+
+## Запуск (Mac — legacy до 03.09)
+
+```bash
+bash scripts/browser/start-chrome.sh        # Chrome с CDP
+bash scripts/account/run_account.sh <acc>   # браузер + воркер, идемпотентно
+# автопилот и чаты — launchd: autopilot_cron.sh, chat_cron.sh (см. scripts/)
+```
+
 ## Крон (пользователь root)
 
 - `*/15 * * * *` `scripts/rhythm_keeper.sh` — живость всех `accounts/*.env`,
@@ -78,7 +120,8 @@ logs/               — worker-<acc>.log, autopilot.log, rhythm.log, respond/ (�
 
 ## Гейты безопасности (RULES.md §2)
 
-- лимит 3 платных отправки/день, потолок цены отклика 500 ₽ (`MAX_RESPONSE_PRICE_RUB`)
+- дневной лимит отправок `PROFI_DAILY_SEND_LIMIT` (дефолт 0 = без лимита;
+  до 03.09.2026 был 3), потолок цены отклика 500 ₽ (`MAX_RESPONSE_PRICE_RUB`)
 - `--send` — только явное разрешение; тексты всегда кастомные и честные
 - ставка в форме: `config.RATE`
 
