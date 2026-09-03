@@ -35,6 +35,9 @@ def hard_filter(s: OrderSnippet) -> FilterVerdict:
     if any(p in text or p in badges_text for p in config.VACANCY_PATTERNS):
         return FilterVerdict(False, "похоже на вакансию")
 
+    if any(p in text or p in badges_text for p in config.BARTER_PATTERNS):
+        return FilterVerdict(False, "бартер/без денег")
+
     if config.SUBJECT_KEYWORDS and not any(k in text for k in config.SUBJECT_KEYWORDS):
         return FilterVerdict(False, "предмет не совпал")
 

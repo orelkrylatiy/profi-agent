@@ -40,6 +40,37 @@ class RespondError(Exception):
     pass
 
 
+class OrderHiddenError(RespondError):
+    """Заказ скрыт площадкой («Заказ скрыт — на него нельзя откликнуться»).
+
+    Это не сбой воркера: дешёвые заказы площадка/клиент прячут за минуты,
+    между загрузкой деталей и попыткой отправки. Автопилот такие кандидаты
+    корректно скипает (main.py: код возврата 3), а не ретраит.
+    """
+
+
+# Маркеры неживой карточки (lowercase, ищем в тексте страницы)
+HIDDEN_MARKERS = (
+    "заказ скрыт",
+    "нельзя откликнуться",
+    "заказ неактуальн",
+    "заказ отменён",
+    "заказ отменен",
+)
+
+
+def hidden_marker(page) -> str | None:
+    """Маркер скрытого/недоступного заказа на карточке (или None). Read-only."""
+    try:
+        body = page.locator("body").inner_text(timeout=3_000).lower()
+    except Exception:
+        return None
+    for m in HIDDEN_MARKERS:
+        if m in body:
+            return m
+    return None
+
+
 SUIT_GATE_TEXT = "Вам подходит этот заказ"
 
 
@@ -78,7 +109,16 @@ def _open_via_write_client(order_page: Page) -> None:
         WRITE_CLIENT_CTA, exact=False
     )
     if cta.count() == 0:
-        raise RespondError("нет ни блока тарифов, ни CTA «Написать клиенту»")
+        marker = hidden_marker(order_page)
+        if marker:
+            raise OrderHiddenError(f"заказ скрыт (маркер {marker!r})")
+        try:
+            tail = order_page.locator("body").inner_text(timeout=3_000)[-300:]
+        except Exception:
+            tail = "<не прочитали>"
+        raise RespondError(
+            f"нет ни блока тарифов, ни CTA «Написать клиенту»; хвост карточки: {tail!r}"
+        )
     human_pause(0.6, 1.2)
     cta.first.click(delay=random.randint(70, 150))
     try:
@@ -134,6 +174,9 @@ def open_respond_form(
 
 
 def _open_respond_form_inner(order_page: Page, mode: str) -> Page:
+    marker = hidden_marker(order_page)
+    if marker:
+        raise OrderHiddenError(f"заказ скрыт (маркер {marker!r})")
     if order_page.get_by_test_id(TARIFFS_BLOCK_TESTID).count() == 0:
         _pass_suit_gate(order_page)
     if order_page.get_by_test_id(TARIFFS_BLOCK_TESTID).count() == 0:

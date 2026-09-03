@@ -209,6 +209,14 @@ class BrowserManager:
         newtab) НЕ трогаем: r.php бывает открыт chat-пробником прямо сейчас.
         """
         closed: list[str] = []
+        # Кооперативная пауза: автопилот отправляет отклик — вкладки не трогаем,
+        # иначе гигиена закроет вкладку заказа прямо после клика (инциденты
+        # #93438144/#93464149). Протухший сигнал (>240 с) игнорируем.
+        try:
+            if (time.time() - config.SEND_PAUSE_FILE.stat().st_mtime) < 240:
+                return closed
+        except OSError:
+            pass
         try:
             ctx = self._default_context()
         except Exception:

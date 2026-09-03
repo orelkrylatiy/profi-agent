@@ -69,11 +69,22 @@ def open_candidate(
             # открывается напрямую по штатному URL n.php?o=<id>.
             log.info("карточки #%s нет в ленте — открываю по прямому URL", order_id)
             order_page = ctx.new_page()
-            order_page.goto(
-                f"{config.FEED_URL}?o={order_id}",
-                wait_until="domcontentloaded",
-                timeout=45_000,
-            )
+            try:
+                order_page.goto(
+                    f"{config.FEED_URL}?o={order_id}",
+                    wait_until="domcontentloaded",
+                    timeout=45_000,
+                )
+            except Exception:
+                # Chrome бывает занят (гонка циклов воркера и автопилота,
+                # тяжёлые вкладки) — один повтор вместо потери живого
+                # кандидата (2026-09-03: goto Timeout на #93467476/#93467371)
+                log.warning("прямой URL #%s не открылся за 45 с — повторяю", order_id)
+                order_page.goto(
+                    f"{config.FEED_URL}?o={order_id}",
+                    wait_until="domcontentloaded",
+                    timeout=30_000,
+                )
         else:
             card.scroll_into_view_if_needed(timeout=10_000)
             human_pause()

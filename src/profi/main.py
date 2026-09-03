@@ -52,7 +52,7 @@ def setup_logging() -> None:
     console = logging.StreamHandler()
     console.setFormatter(fmt)
     root.addHandler(console)
-    fileh = logging.FileHandler(config.LOG_DIR / "worker.log", encoding="utf-8")
+    fileh = logging.FileHandler(config.WORKER_LOG, encoding="utf-8")
     fileh.setFormatter(fmt)
     fileh.setLevel(logging.DEBUG)
     root.addHandler(fileh)
@@ -203,6 +203,11 @@ def run_loop(max_cycles: int | None = None) -> int:
                 log.info("нерабочие часы — мониторинг спит (проверка раз в 10 мин)")
                 time.sleep(10 * 60)
                 continue
+            if _send_pause_active():
+                # автопилот отправляет отклик — не лезем в Chrome (вкладку
+                # отклика гигиенически не трогаем, reload не устраиваем)
+                time.sleep(15)
+                continue
             if not started:
                 state = bm.start()
                 started = True
@@ -297,7 +302,13 @@ def run_respond(order_id: str, rate: int, text: str, send: bool) -> int:
         ctx = bm.context()
         try:
             order_page = respond_mod.open_respond_form(ctx, bm.page, order_id, config.RESPOND_MODE)
-        except (OrderOpenError, respond_mod.RespondError) as e:
+        except respond_mod.OrderHiddenError as e:
+            log.warning("заказ #%s скрыт — откликнуться нельзя (%s)", order_id, e)
+            return 3
+        except OrderOpenError:
+            # карточка не открылась (исчезла/таймаут) — автопилот скипнет
+            raise
+        except respond_mod.RespondError as e:
             log.error("форма отклика #%s не открылась: %s", order_id, e)
             return 1
         footer = respond_mod.fill_form(order_page, rate, text, mode=config.RESPOND_MODE)
@@ -441,6 +452,31 @@ def _worker_pattern() -> str:
     if tag:
         return f"profi\\.main --rhythm-tag {re.escape(tag)}$"
     return r"profi\.main( --rhythm-tag \S+)?$"  # пробел перед флагом обязателен
+
+
+def _worker_pause(on: bool) -> None:
+    """Кооперативная пауза воркера на время платной отправки.
+
+    Windows-совместимо: pgrep/pkill здесь нет, поэтому вместо остановки
+    процесса автопилот ставит файл-сигнал (config.SEND_PAUSE_FILE) — воркер
+    пропускает циклы, таб-гигиена не трогает вкладки (инциденты
+    #93438144/#93464149).
+    """
+    try:
+        if on:
+            config.SEND_PAUSE_FILE.write_text(str(int(time.time())), encoding="utf-8")
+        else:
+            config.SEND_PAUSE_FILE.unlink(missing_ok=True)
+    except Exception:
+        pass
+
+
+def _send_pause_active() -> bool:
+    """True, если файл-сигнал отправки свежий (< 240 с; протухший игнорируем)."""
+    try:
+        return (time.time() - config.SEND_PAUSE_FILE.stat().st_mtime) < 240
+    except OSError:
+        return False
 
 
 def _worker_running() -> bool:
@@ -734,7 +770,7 @@ def run_chat_auto(ctx=None) -> int:
     if not in_work_hours():
         print("нерабочие часы — чаты не обслуживаем (RULES: 8–23)")
         return 0
-    lock = config.DATA_DIR / "autopilot.lock"
+    lock = config.AUTOPILOT_LOCK
     if not _lock_acquire(lock):
         print("autopilot.lock занят — автопилот работает, выходим")
         return 0
@@ -887,7 +923,7 @@ def run_autopilot() -> int:
     from profi import llm as llm_mod
 
     now = _dt.now()
-    lock = config.DATA_DIR / "autopilot.lock"
+    lock = config.AUTOPILOT_LOCK
     try:
         # рабочие часы (config.WORK_HOURS, по умолчанию 8–23; общий гейт
         # с воркером и чатами — utils.workhours)
@@ -975,7 +1011,7 @@ def run_autopilot() -> int:
                         (f"LLM/JSON: {last_err}"[:300], int(time.time()), order_id),
                     )
                     store.conn.commit()
-                    with open(config.LOG_DIR / "autopilot.log", "a", encoding="utf-8") as f:
+                    with open(config.AUTOPILOT_LOG, "a", encoding="utf-8") as f:
                         f.write(f"{now:%Y-%m-%d %H:%M} #{order_id} LLM_ERROR x2: {last_err}\n")
                     continue
 
@@ -990,7 +1026,7 @@ def run_autopilot() -> int:
                 if has_contacts(text):
                     store.set_send_status(order_id, "skipped")
                     store.set_note(order_id, "скип: постчек нашёл контакты/ссылку в тексте LLM")
-                    with open(config.LOG_DIR / "autopilot.log", "a", encoding="utf-8") as f:
+                    with open(config.AUTOPILOT_LOG, "a", encoding="utf-8") as f:
                         f.write(
                             f"{now:%Y-%m-%d %H:%M} #{order_id} INJECTION_GUARD: текст отвергнут\n"
                         )
@@ -1014,10 +1050,24 @@ def run_autopilot() -> int:
                 was_running = _worker_running()
                 if was_running:
                     _stop_worker()
+                _worker_pause(True)  # Windows: воркер жив — кооперативная пауза
                 send_failed = False
                 try:
                     try:
                         result = run_respond(order_id, config.RATE, text, send=True)
+                        if result == 3:
+                            # заказ скрыт площадкой — не сбой воркера, корректный скип
+                            store.set_send_status(order_id, "skipped")
+                            store.set_note(
+                                order_id, "скип: заказ скрыт — на него нельзя откликнуться"
+                            )
+                            with open(config.AUTOPILOT_LOG, "a", encoding="utf-8") as f:
+                                f.write(
+                                    f"{now:%Y-%m-%d %H:%M} #{order_id} HIDDEN: заказ скрыт площадкой\n"
+                                )
+                            log.warning("#%s: заказ скрыт — скип", order_id)
+                            sent = None
+                            continue  # finally ниже снимет паузу
                         sent = result == 0
                     except OrderOpenError as e:
                         # карточка исчезла из ленты — заказ недоступен, не ретраим
@@ -1037,10 +1087,11 @@ def run_autopilot() -> int:
                         send_failed = True
                         sent = None
                 finally:
+                    _worker_pause(False)
                     if was_running:
                         _start_worker()
                 if send_failed:
-                    with open(config.LOG_DIR / "autopilot.log", "a", encoding="utf-8") as f:
+                    with open(config.AUTOPILOT_LOG, "a", encoding="utf-8") as f:
                         f.write(f"{now:%Y-%m-%d %H:%M} #{order_id} FAIL: см. worker.log\n")
                     continue
                 store.set_note(
@@ -1056,7 +1107,7 @@ def run_autopilot() -> int:
                         (int(time.time()), order_id),
                     )
                     store.conn.commit()
-                with open(config.LOG_DIR / "autopilot.log", "a", encoding="utf-8") as f:
+                with open(config.AUTOPILOT_LOG, "a", encoding="utf-8") as f:
                     f.write(
                         f"{now:%Y-%m-%d %H:%M} #{order_id} send={'ok' if sent else 'fail'}: {reason}\n"
                     )

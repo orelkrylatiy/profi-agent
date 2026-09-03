@@ -43,6 +43,20 @@ DATA_DIR = PROJECT_DIR / "data"
 LOG_DIR = PROJECT_DIR / "logs"
 DB_PATH = Path(_get("PROFI_DB", str(DATA_DIR / "profi.db")))
 
+# --- Разделение нескольких акков на одной машине: свой лог и лок ---
+# PROFI_LOG_TAG задаётся в accounts/<акк>.env; пустой = старые имена файлов.
+LOG_TAG = _get("PROFI_LOG_TAG", "").strip()
+WORKER_LOG = LOG_DIR / (f"worker-{LOG_TAG}.log" if LOG_TAG else "worker.log")
+AUTOPILOT_LOG = LOG_DIR / (f"autopilot-{LOG_TAG}.log" if LOG_TAG else "autopilot.log")
+AUTOPILOT_LOCK = DATA_DIR / (f"{LOG_TAG}.autopilot.lock" if LOG_TAG else "autopilot.lock")
+
+# Файл-сигнал «идёт платная отправка»: автопилот ставит его перед открытием
+# формы отклика и снимает после. Воркер на это время пропускает цикл, а
+# таб-гигиена не закрывает вкладки (pgrep/pkill на Windows недоступны —
+# сериализация автопилота с воркером только кооперативная; инциденты
+# #93438144/#93464149: гигиена воркера закрыла вкладку сразу после клика).
+SEND_PAUSE_FILE = DATA_DIR / (f"{LOG_TAG}.send-pause" if LOG_TAG else "send-pause")
+
 # --- Персона (промпт) и фильтры: один аккаунт = одна персона ---
 PERSONA = _get("PROFI_PERSONA", "info")
 PERSONA_DIR = PROJECT_DIR / "personas"
@@ -87,6 +101,16 @@ MIN_RATE = (
     None  # 2026-08-31: фильтр по цене ВЫКЛЮЧЕН владельцем (вход на площадку, берём любые бюджеты)
 )
 VACANCY_PATTERNS = ["ваканс"]
+# Бартер/обмен/бесплатно — не монетизируются (владелец 03.09: «цель — бабки,
+# а не что-то другое»). Без «без доплат»/«обмен» поодиночке — ложные SKIP дороже.
+BARTER_PATTERNS = [
+    "бартер",
+    "обмен урок",
+    "обмен услуг",
+    "взаимозачёт",
+    "взаимозачет",
+    "бесплатн",
+]
 REMOTE_ONLY = True  # geo.remote пуст → только очно → skip
 
 # --- Денежные предохранители (RULES.md §2; ревью P0-2) ---
