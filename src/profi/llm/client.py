@@ -71,6 +71,11 @@ def _is_limit_error(err: Exception) -> bool:
     return "429" in s or "1308" in s or "1310" in s or "Limit" in s
 
 
+# Публичный алиас: вызывающий код (autopilot, чаты) различает «лимит
+# провайдера» (пауза флоу) от прочих сбоев (ретрай/скип кандидата).
+is_limit_error = _is_limit_error
+
+
 def _key(p: str) -> tuple[str | None, str]:
     if p == "glm":
         for n in ("GLM_API_KEY", "ZAI_API_KEY"):

@@ -57,6 +57,12 @@ AUTOPILOT_LOCK = DATA_DIR / (f"{LOG_TAG}.autopilot.lock" if LOG_TAG else "autopi
 # #93438144/#93464149: гигиена воркера закрыла вкладку сразу после клика).
 SEND_PAUSE_FILE = DATA_DIR / (f"{LOG_TAG}.send-pause" if LOG_TAG else "send-pause")
 
+# Файл-пауза «LLM у провайдера на лимите» (429/1308/1310): автопилот пишет
+# сюда ts сброса из текста ошибки, и до этого времени флоу откликов и чаты
+# не запускаются вовсе (по образцу WORK_HOURS) — ноль холостых вызовов,
+# кандидаты остаются в очереди.
+LLM_COOLDOWN_FILE = DATA_DIR / (f"{LOG_TAG}.llm-cooldown" if LOG_TAG else "llm-cooldown")
+
 # --- Персона (промпт) и фильтры: один аккаунт = одна персона ---
 PERSONA = _get("PROFI_PERSONA", "info")
 PERSONA_DIR = PROJECT_DIR / "personas"

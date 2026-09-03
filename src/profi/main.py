@@ -454,6 +454,14 @@ def _worker_pattern() -> str:
     return r"profi\.main( --rhythm-tag \S+)?$"  # пробел перед флагом обязателен
 
 
+def _env_int(name: str, default: int) -> int:
+    """int из env/.env (через config._get) с дефолтом."""
+    try:
+        return int(config._get(name, str(default)) or default)
+    except (TypeError, ValueError):
+        return default
+
+
 def _worker_pause(on: bool) -> None:
     """Кооперативная пауза воркера на время платной отправки.
 
@@ -477,6 +485,50 @@ def _send_pause_active() -> bool:
         return (time.time() - config.SEND_PAUSE_FILE.stat().st_mtime) < 240
     except OSError:
         return False
+
+
+# Пауза при лимите LLM-провайдера (429/1308/1310): флоу не запускаем вовсе
+# (по образцу нерабочих часов) — ни Chrome, ни локов, ни холостых вызовов.
+_LLM_COOLDOWN_DEFAULT_S = 30 * 60  # ts сброса не распарсился
+_LLM_COOLDOWN_CAP_S = 90 * 60  # потолок: провайдер мог иметь в виду другой пояс
+_RESET_TS_RE = re.compile(r"reset at (\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})")
+_last_cooldown_log = 0.0
+
+
+def _llm_cooldown_until() -> int:
+    """ts, до которого LLM считается недоступным (0 — доступен)."""
+    try:
+        return int(config.LLM_COOLDOWN_FILE.read_text(encoding="utf-8").strip() or 0)
+    except (OSError, ValueError):
+        return 0
+
+
+def _llm_cooldown_set(err: Exception) -> None:
+    """Запомнить лимитную ошибку провайдера как паузу флоу до сброса.
+
+    ts сброса берём из текста ошибки («limit will reset at …»); не
+    распарсился или в прошлом — дефолт 30 мин. Потолок 90 мин: если часовой
+    пояс провайдера иной, следующий цикл перепроверит и продлит.
+    """
+    until = 0
+    m = _RESET_TS_RE.search(str(err))
+    if m:
+        try:
+            until = int(datetime.strptime(m.group(1), "%Y-%m-%d %H:%M:%S").timestamp())
+        except ValueError:
+            until = 0
+    now = int(time.time())
+    if until <= now:
+        until = now + _LLM_COOLDOWN_DEFAULT_S
+    until = min(until, now + _LLM_COOLDOWN_CAP_S)
+    try:
+        config.LLM_COOLDOWN_FILE.write_text(str(until), encoding="utf-8")
+        log.warning(
+            "LLM на лимите — флоу на паузе до %s",
+            datetime.fromtimestamp(until).strftime("%H:%M"),
+        )
+    except OSError:
+        pass
 
 
 def _worker_running() -> bool:
@@ -770,6 +822,9 @@ def run_chat_auto(ctx=None) -> int:
     if not in_work_hours():
         print("нерабочие часы — чаты не обслуживаем (RULES: 8–23)")
         return 0
+    if _llm_cooldown_until() > time.time():
+        print("LLM на лимите — чаты не обслуживаем")
+        return 0
     lock = config.AUTOPILOT_LOCK
     if not _lock_acquire(lock):
         print("autopilot.lock занят — автопилот работает, выходим")
@@ -805,6 +860,7 @@ def run_chat_auto(ctx=None) -> int:
                     f"{d['name']} (заказ {order_id or 'неизвестен'}):\n\n{dialog_text[-4000:]}"
                 )
                 verdict = None
+                chat_err: Exception | None = None
                 for m in llm_mod.models_chain():
                     try:
                         raw = llm_mod.chat(
@@ -817,8 +873,11 @@ def run_chat_auto(ctx=None) -> int:
                         verdict = llm_mod.json_reply(raw)
                         break
                     except Exception as e:
+                        chat_err = e
                         log.warning("chat LLM %s: %s", m, e)
                 if verdict is None:
+                    if chat_err is not None and llm_mod.is_limit_error(chat_err):
+                        _llm_cooldown_set(chat_err)  # дальше чаты тоже молчат до сброса
                     print(f"{d['name']}: LLM не дал JSON — пропускаем")
                     continue
                 if verdict.get("needs_human"):
@@ -929,23 +988,61 @@ def run_autopilot() -> int:
         # с воркером и чатами — utils.workhours)
         if not in_work_hours(now):
             return 0
+        # LLM у провайдера на лимите — флоу не запускаем вовсе: без лока,
+        # без Chrome, кандидаты остаются в очереди. Лог не шпакуем — раз в 10 мин
+        global _last_cooldown_log
+        cooldown_until = _llm_cooldown_until()
+        if cooldown_until > time.time():
+            if time.time() - _last_cooldown_log > 600:
+                _last_cooldown_log = time.time()
+                log.info(
+                    "autopilot: LLM на лимите до %s — флоу не запускаю",
+                    datetime.fromtimestamp(cooldown_until).strftime("%H:%M"),
+                )
+            return 0
         if not _lock_acquire(lock):
             return 0  # живой соседний проход; стейл-лок старше 30 мин подобран сам
 
         store = Store(config.DB_PATH)
         try:
             rows = store.conn.execute(
-                "SELECT order_id, details_json FROM candidates "
+                "SELECT order_id, details_json, first_seen_at FROM candidates "
                 "WHERE details_status='ready' AND send_status='not_sent' AND draft_status='pending' ORDER BY first_seen_at DESC"
             ).fetchall()
             if not rows:
                 return 0
+
+            # Трупы из прошлого: кандидат старше ~2.5 ч с момента появления почти
+            # наверняка скрыт площадкой («Заказ скрыт»), а страница такого заказа
+            # грузится по 75+ с (сервер подскучивает) — один проход съедал час,
+            # держал autopilot.lock и не пускал свежие отправки (03.09).
+            # Старые булк-скипаем БЕЗ попытки, свежие обрабатываем первыми.
+            max_age_s = int(_env_int("PROFI_MAX_CANDIDATE_AGE_MIN", 150)) * 60
+            stale_cut = int(time.time()) - max_age_s
+            stale = store.conn.execute(
+                "UPDATE candidates SET send_status='skipped', updated_at=? "
+                "WHERE details_status='ready' AND send_status='not_sent' "
+                "AND draft_status='pending' AND COALESCE(first_seen_at, 0) < ?",
+                (int(time.time()), stale_cut),
+            ).rowcount
+            store.conn.commit()
+            if stale:
+                log.warning("autopilot: булк-скип %d протухших кандидатов (>%d мин)", stale, max_age_s // 60)
+            rows = [
+                r
+                for r in rows
+                if (r["first_seen_at"] or 0) >= stale_cut  # снапшот мог включать трупы
+            ]
+            if not rows:
+                return 0
+
             if not llm_mod.status()["key_masked"]:
                 log.info(
                     "autopilot: есть кандидаты (%d), но LLM-ключ не задан — пропускаю", len(rows)
                 )
                 return 0
 
+            tried = 0  # лимит попыток за проход: не держим lock часами
             for row in rows:
                 order_id = row["order_id"]
                 try:
@@ -984,6 +1081,13 @@ def run_autopilot() -> int:
                 # LLM-триаж + текст. Цепочка попыток: основная (дешёвая)
                 # модель → она же с запасом токенов → фолбэк на основную
                 # модель (LLM_FALLBACK_MODEL). Две неудачи подряд → error.
+                tried += 1
+                if tried > _env_int("PROFI_MAX_TRIES_PER_PASS", 8):
+                    log.info(
+                        "autopilot: %d попыток за проход — остальное на следующий цикл",
+                        _env_int("PROFI_MAX_TRIES_PER_PASS", 8),
+                    )
+                    break
                 user_prompt = _llm_order_payload(d) + "\n\n" + _recipient_hint(d)
                 verdict = None
                 last_err = None
@@ -1005,6 +1109,16 @@ def run_autopilot() -> int:
                     except Exception as e:
                         last_err = e
                 if verdict is None:
+                    if llm_mod.is_limit_error(last_err):
+                        # лимит провайдера: кандидатов не портим (остаются
+                        # pending) и обрываем проход — остальные дождутся сброса
+                        _llm_cooldown_set(last_err)
+                        with open(config.AUTOPILOT_LOG, "a", encoding="utf-8") as f:
+                            f.write(
+                                f"{now:%Y-%m-%d %H:%M} LLM_LIMIT: пауза флоу, "
+                                "кандидаты остаются в очереди\n"
+                            )
+                        return 0
                     store.conn.execute(
                         "UPDATE candidates SET draft_status='error', last_error=?, updated_at=? "
                         "WHERE order_id=?",
@@ -1070,10 +1184,20 @@ def run_autopilot() -> int:
                             continue  # finally ниже снимет паузу
                         sent = result == 0
                     except OrderOpenError as e:
-                        # карточка исчезла из ленты — заказ недоступен, не ретраим
-                        store.set_send_status(order_id, "skipped")
-                        store.set_note(order_id, f"скип: карточка недоступна — {e}")
-                        log.warning("#%s: %s", order_id, e)
+                        # Карточка не открылась (goto-таймаут/исчезла): НЕ скипаем —
+                        # зависания страниц бывают транзиентными (03.09: свежие
+                        # заказы открывались через попытку). Кандидат остаётся
+                        # pending и будет повторён следующим проходом; трупов
+                        # выше 2.5 ч снимет булк-скип.
+                        store.set_note(order_id, f"не открылась, повторим: {str(e)[:120]}")
+                        store.conn.execute(
+                            "UPDATE candidates SET last_error=?, updated_at=? WHERE order_id=?",
+                            (f"open-fail: {str(e)[:200]}", int(time.time()), order_id),
+                        )
+                        store.conn.commit()
+                        log.warning("#%s: не открылась — остаётся в очереди (%s)", order_id, str(e)[:80])
+                        with open(config.AUTOPILOT_LOG, "a", encoding="utf-8") as f:
+                            f.write(f"{now:%Y-%m-%d %H:%M} #{order_id} OPEN_FAIL: повтор следующего прохода\n")
                         send_failed = True
                         sent = None
                     except Exception as e:
