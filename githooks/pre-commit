@@ -1,0 +1,31 @@
+#!/bin/sh
+# Pre-commit: свежий ops-снапшот уезжает в каждом коммите (цель — чтобы отчёт
+# тоже коммитился, а не только код). Кроссплатформенно: Windows (Git Bash),
+# Linux, macOS — потому что это /bin/sh, который git даёт везде.
+#
+# Активация (один раз на клон):
+#   git config core.hooksPath githooks
+#
+# Ошибка генерации НЕ блокирует коммит: отчёт — сайд-эффект, а не гейт
+# (на винде он может упасть, например, из-за лока БД во время отправки).
+set -u
+
+# Merge-коммиты не снапшотим — шум без пользы.
+[ -f "$(git rev-parse --git-dir)/MERGE_HEAD" ] && exit 0
+
+ROOT="$(git rev-parse --show-toplevel)"
+PY="$(command -v python3 || command -v python)" || PY=""
+if [ -z "${PY:-}" ]; then
+  echo "pre-commit: python не найден — ops-снапшот пропущен" >&2
+  exit 0
+fi
+
+REPORT="$("$PY" "$ROOT/scripts/ops/daily_report.py" --date today 2>/dev/null)"
+if [ $? -ne 0 ]; then
+  echo "pre-commit: daily_report.py упал — коммитим без свежего ops-снапшота" >&2
+  exit 0
+fi
+
+git add ops/latest.json ops/daily >/dev/null 2>&1
+echo "pre-commit: ops-снапшот добавлен в коммит (${REPORT:-ops/latest.json})"
+exit 0

@@ -83,6 +83,26 @@ git commit -m "ops: daily snapshot YYYY-MM-DD"
 git push
 ```
 
+## Автоматически: pre-commit hook
+
+Чтобы свежий снапшот уезжал с КАЖДЫМ коммитом (руками ничего запускать не надо),
+в репо есть хук `githooks/pre-commit`: перед коммитом он сам гоняет
+`scripts/ops/daily_report.py --date today` и делает `git add` отчёта.
+
+Активация — один раз на клон (Windows Git Bash / Linux / macOS одинаково):
+
+```bash
+git config core.hooksPath githooks
+```
+
+Нюансы:
+
+- хук — `/bin/sh`, работает везде, где есть git; python ищет как `python3`, потом `python`;
+- если генерация упала (например, лок БД во время отправки отклика), хук печатает
+  предупреждение в stderr, но коммит НЕ блокирует — отчёт не гейт, а сайд-эффект;
+- merge-коммиты не снапшотятся;
+- `.gitattributes` держит `githooks/*` в LF, так что хук не ломается на клонах.
+
 После push можно попросить ChatGPT, например:
 
 ```text
