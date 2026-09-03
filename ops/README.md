@@ -49,7 +49,7 @@ Default reporting timezone is `Asia/Yekaterinburg`; override with `--timezone`.
 For a clean VPS clone on `main`:
 
 ```bash
-./scripts/ops/daily_publish.sh yesterday
+bash scripts/ops/daily_publish.sh yesterday
 ```
 
 The publisher:
@@ -72,7 +72,7 @@ OPS_PUBLISH_BRANCH=main
 Run once a day after the reporting day has definitely ended. On the current VPS setup, 02:30 is a conservative default:
 
 ```cron
-30 2 * * * cd /root/profi-agent && OPS_TIMEZONE=Asia/Yekaterinburg ./scripts/ops/daily_publish.sh yesterday >> logs/ops-daily.log 2>&1
+30 2 * * * cd /root/profi-agent && OPS_TIMEZONE=Asia/Yekaterinburg bash scripts/ops/daily_publish.sh yesterday >> logs/ops-daily.log 2>&1
 ```
 
 If the machine uses another repository path, change only the `cd` part.
