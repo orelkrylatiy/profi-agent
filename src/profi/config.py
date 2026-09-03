@@ -73,6 +73,9 @@ SUBJECT_KEYWORDS = [
 ]
 
 # --- Chrome (правило: один аккаунт = один user-data-dir, свой CDP-порт) ---
+# 1 = Chrome сами не запускаем: нет CDP — BROWSER_OFFLINE и ждём (в Profi
+# не заходим), браузер поднимает владелец. 0 = разрешён авто-запуск (VPS).
+CHROME_NO_LAUNCH = _get("PROFI_CHROME_NO_LAUNCH", "0") == "1"
 CHROME_PATH = _get(
     "PROFI_CHROME_PATH",
     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",

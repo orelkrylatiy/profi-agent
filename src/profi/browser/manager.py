@@ -72,6 +72,16 @@ class BrowserManager:
         self._pw.selectors.set_test_id_attribute("data-testid")
         self.browser = self._connect()
         if self.browser is None:
+            if config.CHROME_NO_LAUNCH:
+                # Chrome поднимает владелец (сессия/телеметрия в его руках):
+                # сами не стартуем — OFFLINE, воркер молча ждёт (инцидент 03.09:
+                # автозапуск схватил чужой профиль и упал)
+                log.info(
+                    "Chrome по CDP :%s не найден, авто-запуск выключен "
+                    "(PROFI_CHROME_NO_LAUNCH=1) — жду, пока браузер поднимут",
+                    config.CDP_PORT,
+                )
+                return BROWSER_OFFLINE
             self.browser = self._launch_and_connect()
         if self.browser is None:
             return BROWSER_OFFLINE

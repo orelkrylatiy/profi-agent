@@ -174,31 +174,52 @@ def _chat_openai_style(system: str, user: str, temperature: float, max_tokens: i
 
 
 def _chat_anthropic(system: str, user: str, temperature: float, max_tokens: int, model: str) -> str:
-    """Anthropic Messages API; совместимо и с прокси GLM (claude-buffet и др.)."""
+    """Anthropic Messages API; совместимо и с прокси GLM (claude-buffet и др.).
+
+    Цепочка ключей: ANTHROPIC_AUTH_TOKEN/API_KEY → GLM_API_KEY_2/ZAI_API_KEY_2
+    (второй z.ai-аккаунт) — фолбэк при 429/лимите первого, как в openai-пути.
+    """
+    keys: list[tuple[str, str]] = []
     key, kname = _key("anthropic")
-    if not key:
+    if key:
+        keys.append((key, kname))
+    k2, n2 = _fallback_key()
+    if k2 and k2 != key:
+        keys.append((k2, n2))
+    if not keys:
         raise RuntimeError("ANTHROPIC_AUTH_TOKEN/ANTHROPIC_API_KEY не задан")
-    headers = {
-        "Content-Type": "application/json",
-        "anthropic-version": "2023-06-01",
-        # AUTH_TOKEN идёт как Bearer, API_KEY — как x-api-key; шлём оба для прокси
-        "Authorization": f"Bearer {key}",
-    }
-    if kname == "ANTHROPIC_API_KEY":
-        headers["x-api-key"] = key
-    data = _post(
-        _base("anthropic") + "/v1/messages",
-        headers,
-        {
-            "model": model,
-            "system": system,
-            "max_tokens": max_tokens,
-            "temperature": temperature,
-            "messages": [{"role": "user", "content": user}],
-        },
-    )
-    parts = [b.get("text", "") for b in data.get("content", []) if b.get("type") == "text"]
-    return "".join(parts)
+    last_err: Exception | None = None
+    for i, (k, kname_i) in enumerate(keys):
+        headers = {
+            "Content-Type": "application/json",
+            "anthropic-version": "2023-06-01",
+            # AUTH_TOKEN идёт как Bearer, API_KEY — как x-api-key; шлём оба для прокси
+            "Authorization": f"Bearer {k}",
+        }
+        if kname_i == "ANTHROPIC_API_KEY":
+            headers["x-api-key"] = k
+        try:
+            data = _post(
+                _base("anthropic") + "/v1/messages",
+                headers,
+                {
+                    "model": model,
+                    "system": system,
+                    "max_tokens": max_tokens,
+                    "temperature": temperature,
+                    "messages": [{"role": "user", "content": user}],
+                },
+            )
+            if i > 0:
+                _ENV["_last_used"] = "fallback"
+            parts = [b.get("text", "") for b in data.get("content", []) if b.get("type") == "text"]
+            return "".join(parts)
+        except Exception as exc:  # лимит/сбой — пробуем следующий ключ
+            last_err = exc
+            if not _is_limit_error(exc) or i == len(keys) - 1:
+                raise
+            time.sleep(2)
+    raise last_err  # pragma: no cover
 
 
 def set_model(model: str) -> None:

@@ -203,6 +203,16 @@ def run_loop(max_cycles: int | None = None) -> int:
                 log.info("нерабочие часы — мониторинг спит (проверка раз в 10 мин)")
                 time.sleep(10 * 60)
                 continue
+            cooldown_until = _llm_cooldown_until()
+            if cooldown_until > time.time():
+                # LLM у провайдера на лимите: в Profi не заходим вовсе (лента
+                # не перезагружается, чаты молчат) — по образцу нерабочих часов
+                log.info(
+                    "LLM на лимите до %s — воркер спит (проверка раз в 10 мин)",
+                    datetime.fromtimestamp(cooldown_until).strftime("%H:%M"),
+                )
+                time.sleep(10 * 60)
+                continue
             if _send_pause_active():
                 # автопилот отправляет отклик — не лезем в Chrome (вкладку
                 # отклика гигиенически не трогаем, reload не устраиваем)
