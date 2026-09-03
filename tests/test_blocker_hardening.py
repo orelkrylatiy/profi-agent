@@ -114,6 +114,6 @@ def test_account_autopilot_restart_uses_same_worker_flock(tmp_path):
     )
     assert proc.returncode == 0, proc.stderr
     cmd = proc.stdout.strip()
-    assert "flock -n" in cmd
+    assert "flock -w 15" in cmd
     assert "info.worker.lock" in cmd
     assert "--rhythm-tag info" in cmd
