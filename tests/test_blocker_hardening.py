@@ -89,3 +89,31 @@ def test_valid_respond_modes_still_import():
         )
         assert proc.returncode == 0, proc.stderr
         assert proc.stdout.strip() == mode
+
+
+def test_account_autopilot_restart_uses_same_worker_flock(tmp_path):
+    fake_flock = tmp_path / "flock"
+    fake_flock.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    fake_flock.chmod(0o755)
+
+    env = os.environ.copy()
+    env["PATH"] = f"{tmp_path}{os.pathsep}{env.get('PATH', '')}"
+    env["PROFI_RHYTHM_TAG"] = "info"
+    env["PROFI_LOG_TAG"] = "info"
+    env.pop("PROFI_WORKER_START_CMD", None)
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import os, profi.config; print(os.environ.get('PROFI_WORKER_START_CMD', ''))",
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr
+    cmd = proc.stdout.strip()
+    assert "flock -n" in cmd
+    assert "info.worker.lock" in cmd
+    assert "--rhythm-tag info" in cmd
