@@ -38,6 +38,39 @@ def _is_order_response(resp: Response) -> bool:
         return False
 
 
+def _payload_order_id(payload: dict) -> str | None:
+    """Order id из BoOrderScreen payload, если структура распознана."""
+    try:
+        orders = (payload.get("data") or {}).get("orders") or []
+        if not orders:
+            return None
+        root = orders[0] or {}
+        bo = root.get("boOrderScreen") or {}
+        value = bo.get("id") or root.get("_id")
+        return str(value) if value is not None else None
+    except Exception:
+        return None
+
+
+def _responses_for_order(responses: list[Response], order_id: str) -> list[Response]:
+    """Оставить только BoOrderScreen именно открываемого заказа.
+
+    Listener висит на BrowserContext, поэтому параллельная вкладка/ручное действие
+    может прислать BoOrderScreen другого заказа. Не связываем payload с кандидатом
+    только по таймингу: это способно записать details B в candidate A и затем
+    сгенерировать персональный отклик не тому клиенту.
+    """
+    matched: list[Response] = []
+    expected = str(order_id)
+    for resp in responses:
+        try:
+            if _payload_order_id(resp.json()) == expected:
+                matched.append(resp)
+        except Exception:
+            continue
+    return matched
+
+
 def open_candidate(
     ctx: BrowserContext, feed_page: Page, order_id: str
 ) -> tuple[Page, list[Response]]:
@@ -115,6 +148,18 @@ def open_candidate(
         while time.monotonic() < deadline and not captured:
             order_page.wait_for_timeout(250)
         order_page.wait_for_timeout(1500)
+        matched = _responses_for_order(captured, order_id)
+        if captured and not matched:
+            seen_ids = []
+            for resp in captured:
+                try:
+                    seen_ids.append(_payload_order_id(resp.json()))
+                except Exception:
+                    seen_ids.append(None)
+            raise OrderOpenError(
+                f"BoOrderScreen не относится к заказу #{order_id}; пойманы ids={seen_ids}"
+            )
+        captured = matched
     except Exception:
         # вкладку открыли мы (popup/прямой URL): ошибка валидации не должна
         # оставлять её открытой (утечка памяти; 2026-09-03: 4 зависших
