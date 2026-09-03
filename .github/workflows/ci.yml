@@ -3,6 +3,8 @@ name: CI
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - "ops/**"
   pull_request:
 
 jobs:
@@ -21,12 +23,12 @@ jobs:
       - name: Ruff lint
         run: uv run ruff check .
 
-      - name: Ruff format check
-        run: uv run ruff format --check .
-
       # shellcheck предустановлен на ubuntu-latest
       - name: ShellCheck
         run: git ls-files 'scripts/**/*.sh' | xargs -n1 shellcheck
 
       - name: Tests
         run: uv run pytest -q
+
+      - name: Ruff format check
+        run: uv run ruff format --check .
