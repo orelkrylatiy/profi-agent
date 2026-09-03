@@ -64,7 +64,7 @@ if RHYTHM_TAG and shutil.which("flock") and not os.environ.get("PROFI_WORKER_STA
     _tag_q = shlex.quote(RHYTHM_TAG)
     _log_q = shlex.quote(str(WORKER_LOG))
     os.environ["PROFI_WORKER_START_CMD"] = (
-        f"cd {_project_q} && nohup flock -n {_lock_q} "
+        f"cd {_project_q} && nohup flock -w 15 {_lock_q} "
         f"env PROFI_RHYTHM_TAG={_tag_q} uv run python -m profi.main "
         f"--rhythm-tag {_tag_q} >> {_log_q} 2>&1 &"
     )
