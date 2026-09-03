@@ -69,11 +69,15 @@ def open_candidate(
             # открывается напрямую по штатному URL n.php?o=<id>.
             log.info("карточки #%s нет в ленте — открываю по прямому URL", order_id)
             order_page = ctx.new_page()
+            # referer ленты ОБЯЗАТЕЛЕН: без него площадка tarpitит прямую
+            # навигацию — документ не приходит и за 45 с (03.09, все
+            # OPEN_FAIL автопилота); с referer dcl=1.5 с.
             try:
                 order_page.goto(
                     f"{config.FEED_URL}?o={order_id}",
                     wait_until="domcontentloaded",
                     timeout=45_000,
+                    referer=config.FEED_URL,
                 )
             except Exception:
                 # Chrome бывает занят (гонка циклов воркера и автопилота,
@@ -84,6 +88,7 @@ def open_candidate(
                     f"{config.FEED_URL}?o={order_id}",
                     wait_until="domcontentloaded",
                     timeout=30_000,
+                    referer=config.FEED_URL,
                 )
         else:
             card.scroll_into_view_if_needed(timeout=10_000)
