@@ -5,6 +5,7 @@ description = "Контур A: воркер откликов Профи.ру (ч
 requires-python = ">=3.11"
 dependencies = [
     "playwright>=1.45",
+    "tzdata>=2025.2",
 ]
 
 [project.scripts]
