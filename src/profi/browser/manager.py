@@ -106,11 +106,36 @@ class BrowserManager:
             except Exception:
                 pass
         self.browser = None
+        self.page = None
         self._pw = None
+
+    def reconnect(self) -> str:
+        """Полностью пересоздать Playwright/CDP connection после падения Chrome.
+
+        Старый Browser object после disconnect не оживает сам. Без reset worker
+        мог бесконечно возвращать BROWSER_OFFLINE даже после того, как supervisor
+        уже поднял новый Chrome на том же порту.
+        """
+        log.warning("CDP соединение потеряно — переподключаю BrowserManager")
+        self.shutdown()
+        try:
+            return self.start()
+        except Exception as e:
+            log.warning("reconnect Chrome не удался: %s", e)
+            self.shutdown()
+            return BROWSER_OFFLINE
 
     def _close_browser(self) -> None:
         if self.browser is not None:
             self.browser.close()
+
+    def _browser_connected(self) -> bool:
+        if self.browser is None:
+            return False
+        try:
+            return self.browser.is_connected()
+        except Exception:
+            return False
 
     # --- CDP ---
 
@@ -191,12 +216,14 @@ class BrowserManager:
         (BoSearchBoardItems → 200 → data.boSearchBoardItems).
         """
         page = self.page
-        if self.browser is None or page is None or page.is_closed():
+        if not self._browser_connected() or page is None:
             return BROWSER_OFFLINE
         try:
+            if page.is_closed():
+                return BROWSER_OFFLINE
             url = page.url
         except Exception as e:
-            log.warning("не смог прочитать url вкладки: %s", e)
+            log.warning("не смог прочитать состояние вкладки: %s", e)
             return BROWSER_OFFLINE
         if not is_feed_url(url):
             # редирект на логин/авторизацию или уход со страницы ленты
@@ -253,19 +280,29 @@ class BrowserManager:
         return closed
 
     def ensure_ready(self) -> str:
-        """Перед каждым циклом: гигиена вкладок + страница жива?"""
-        if self.browser is None:
-            return BROWSER_OFFLINE
+        """Перед каждым циклом: reconnect при dead CDP, затем гигиена вкладок."""
+        if not self._browser_connected():
+            return self.reconnect()
         self.close_stray_tabs()
         page = self.page
-        if page is None or page.is_closed():
-            ctx = self._default_context()
-            page = self._find_feed_page(ctx)
-            if page is None:
-                page = ctx.new_page()
-                try:
-                    page.goto(config.FEED_URL, wait_until="domcontentloaded", timeout=45_000)
-                except Exception as e:
-                    log.warning("goto feed failed: %s", e)
-            self.page = page
-        return self.check_session()
+        try:
+            page_closed = page is None or page.is_closed()
+        except Exception:
+            return self.reconnect()
+        if page_closed:
+            try:
+                ctx = self._default_context()
+                page = self._find_feed_page(ctx)
+                if page is None:
+                    page = ctx.new_page()
+                    try:
+                        page.goto(config.FEED_URL, wait_until="domcontentloaded", timeout=45_000)
+                    except Exception as e:
+                        log.warning("goto feed failed: %s", e)
+                self.page = page
+            except Exception:
+                return self.reconnect()
+        state = self.check_session()
+        if state == BROWSER_OFFLINE and not self._browser_connected():
+            return self.reconnect()
+        return state
