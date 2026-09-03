@@ -1,10 +1,8 @@
 #!/usr/bin/env python3
-"""Daily privacy-safe operational snapshot from local SQLite databases and logs.
+"""Build one privacy-safe daily snapshot from local SQLite databases and logs.
 
-The report intentionally contains aggregates only. Raw log lines, order ids,
-client names, chat text, URLs, headers and secrets are never copied to ops/.
-This makes the generated JSON safe to keep in the public repository and easy
-for ChatGPT/GitHub tooling to analyse later.
+Only aggregate counters are persisted. Raw log lines, order ids, client names,
+chat text, URLs, headers and secrets are never copied into ``ops/``.
 """
 
 from __future__ import annotations
@@ -21,7 +19,6 @@ from zoneinfo import ZoneInfo
 
 DEFAULT_TIMEZONE = "Asia/Yekaterinburg"
 
-# Deliberately narrow allow-list. We count signatures, never persist matching lines.
 LOG_EVENT_PATTERNS: dict[str, re.Pattern[str]] = {
     "feed_auth_cooldown": re.compile(r"\bFEED_AUTH_COOLDOWN\b", re.IGNORECASE),
     "feed_ambiguous": re.compile(r"\bFEED_AMBIGUOUS\b", re.IGNORECASE),
@@ -29,7 +26,8 @@ LOG_EVENT_PATTERNS: dict[str, re.Pattern[str]] = {
     "browser_offline": re.compile(r"\bBROWSER_OFFLINE\b", re.IGNORECASE),
     "auth_required": re.compile(r"\bAUTH_REQUIRED\b", re.IGNORECASE),
     "order_open_fail": re.compile(
-        r"\bOPEN_FAIL\b|открытие #[^ ]+ не удалось|не смог открыть #", re.IGNORECASE
+        r"\bOPEN_FAIL\b|открытие #[^ ]+ не удалось|не смог открыть #",
+        re.IGNORECASE,
     ),
     "llm_limit": re.compile(r"\bLLM_LIMIT\b|LLM на лимите", re.IGNORECASE),
     "send_fail": re.compile(r"\bsend_status=fail\b|\bSEND_FAILED\b", re.IGNORECASE),
@@ -38,12 +36,17 @@ LOG_EVENT_PATTERNS: dict[str, re.Pattern[str]] = {
     "traceback": re.compile(r"Traceback \(most recent call last\)", re.IGNORECASE),
     "tab_hygiene": re.compile(r"гигиена вкладок", re.IGNORECASE),
     "cdp_reconnect": re.compile(r"переподключ", re.IGNORECASE),
-    "browser_exit": re.compile(r"Chrome завершился|Chromium.*(?:killed|crash|terminated)", re.IGNORECASE),
+    "browser_exit": re.compile(
+        r"Chrome завершился|Chromium.*(?:killed|crash|terminated)",
+        re.IGNORECASE,
+    ),
 }
 
 LINE_DATE_RE = re.compile(r"^\[?(?P<date>\d{4}-\d{2}-\d{2})[ T]")
 LEVEL_RE = re.compile(r"\b(?P<level>CRITICAL|ERROR|WARNING)\b")
-ACCOUNT_LOG_RE = re.compile(r"^(?:worker|browser|autopilot)-(?P<account>[A-Za-z0-9_.-]+)\.log$")
+ACCOUNT_LOG_RE = re.compile(
+    r"^(?:worker|browser|autopilot)-(?P<account>[A-Za-z0-9_.-]+)\.log$"
+)
 
 
 def _read_env(path: Path) -> dict[str, str]:
@@ -72,8 +75,7 @@ def _resolve_date(spec: str, tz: ZoneInfo) -> date:
 
 def _window_epoch(target: date, tz: ZoneInfo) -> tuple[int, int]:
     start = datetime.combine(target, time.min, tzinfo=tz)
-    end = start + timedelta(days=1)
-    return int(start.timestamp()), int(end.timestamp())
+    return int(start.timestamp()), int((start + timedelta(days=1)).timestamp())
 
 
 def _git_revision(root: Path) -> str | None:
@@ -87,12 +89,10 @@ def _git_revision(root: Path) -> str | None:
         )
     except (OSError, subprocess.SubprocessError):
         return None
-    value = proc.stdout.strip()
-    return value or None
+    return proc.stdout.strip() or None
 
 
 def _discover_databases(root: Path) -> dict[str, Path]:
-    """Map technical account key -> DB without importing app config or secrets."""
     found: dict[str, Path] = {}
     used_paths: set[Path] = set()
 
@@ -126,43 +126,8 @@ def _discover_databases(root: Path) -> dict[str, Path]:
     return found
 
 
-def _table_exists(conn: sqlite3.Connection, table: str) -> bool:
-    row = conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=? LIMIT 1", (table,)
-    ).fetchone()
-    return row is not None
-
-
-def _column_exists(conn: sqlite3.Connection, table: str, column: str) -> bool:
-    if not _table_exists(conn, table):
-        return False
-    return any(row[1] == column for row in conn.execute(f"PRAGMA table_info({table})"))
-
-
-def _count(conn: sqlite3.Connection, sql: str, params: tuple = ()) -> int:
-    try:
-        row = conn.execute(sql, params).fetchone()
-        return int(row[0] or 0) if row else 0
-    except sqlite3.Error:
-        return 0
-
-
-def _sum_int(conn: sqlite3.Connection, sql: str, params: tuple = ()) -> int:
-    return _count(conn, sql, params)
-
-
-def _group_counts(
-    conn: sqlite3.Connection, sql: str, params: tuple = ()
-) -> dict[str, int]:
-    try:
-        rows = conn.execute(sql, params).fetchall()
-    except sqlite3.Error:
-        return {}
-    return {str(row[0] if row[0] is not None else "unknown"): int(row[1]) for row in rows}
-
-
-def _db_metrics(path: Path, start_ts: int, end_ts: int) -> dict:
-    metrics = {
+def _empty_metrics() -> dict:
+    return {
         "feed": {"new_orders": 0, "orders_seen": 0},
         "candidates": {
             "created": 0,
@@ -185,8 +150,46 @@ def _db_metrics(path: Path, start_ts: int, end_ts: int) -> dict:
             "send_failed": 0,
             "injection_guard": 0,
         },
+        "log_events": {},
         "db_read_error": False,
     }
+
+
+def _table_exists(conn: sqlite3.Connection, table: str) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=? LIMIT 1",
+        (table,),
+    ).fetchone()
+    return row is not None
+
+
+def _column_exists(conn: sqlite3.Connection, table: str, column: str) -> bool:
+    if not _table_exists(conn, table):
+        return False
+    return any(row[1] == column for row in conn.execute(f"PRAGMA table_info({table})"))
+
+
+def _scalar(conn: sqlite3.Connection, sql: str, params: tuple = ()) -> int:
+    try:
+        row = conn.execute(sql, params).fetchone()
+        return int(row[0] or 0) if row else 0
+    except sqlite3.Error:
+        return 0
+
+
+def _groups(conn: sqlite3.Connection, sql: str, params: tuple = ()) -> dict[str, int]:
+    try:
+        rows = conn.execute(sql, params).fetchall()
+    except sqlite3.Error:
+        return {}
+    return {
+        str(row[0] if row[0] is not None else "unknown"): int(row[1])
+        for row in rows
+    }
+
+
+def _db_metrics(path: Path, start_ts: int, end_ts: int) -> dict:
+    metrics = _empty_metrics()
     try:
         conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=5)
     except sqlite3.Error:
@@ -195,75 +198,79 @@ def _db_metrics(path: Path, start_ts: int, end_ts: int) -> dict:
 
     try:
         if _table_exists(conn, "feed_seen"):
-            metrics["feed"]["new_orders"] = _count(
+            metrics["feed"]["new_orders"] = _scalar(
                 conn,
                 "SELECT COUNT(*) FROM feed_seen WHERE first_seen_at>=? AND first_seen_at<?",
                 (start_ts, end_ts),
             )
-            metrics["feed"]["orders_seen"] = _count(
+            metrics["feed"]["orders_seen"] = _scalar(
                 conn,
                 "SELECT COUNT(*) FROM feed_seen WHERE last_seen_at>=? AND last_seen_at<?",
                 (start_ts, end_ts),
             )
 
         if _table_exists(conn, "candidates"):
-            metrics["candidates"]["created"] = _count(
+            metrics["candidates"]["created"] = _scalar(
                 conn,
                 "SELECT COUNT(*) FROM candidates WHERE first_seen_at>=? AND first_seen_at<?",
                 (start_ts, end_ts),
             )
             if _column_exists(conn, "candidates", "details_loaded_at"):
-                metrics["candidates"]["details_ready"] = _count(
+                metrics["candidates"]["details_ready"] = _scalar(
                     conn,
                     "SELECT COUNT(*) FROM candidates WHERE details_status='ready' "
                     "AND details_loaded_at>=? AND details_loaded_at<?",
                     (start_ts, end_ts),
                 )
             if _column_exists(conn, "candidates", "draft_generated_at"):
-                metrics["candidates"]["drafts_generated"] = _count(
+                metrics["candidates"]["drafts_generated"] = _scalar(
                     conn,
                     "SELECT COUNT(*) FROM candidates WHERE draft_generated_at>=? "
                     "AND draft_generated_at<?",
                     (start_ts, end_ts),
                 )
-            metrics["candidates"]["current_send_status"] = _group_counts(
+
+            metrics["candidates"]["current_send_status"] = _groups(
                 conn,
                 "SELECT send_status, COUNT(*) FROM candidates GROUP BY send_status",
             )
-            metrics["candidates"]["current_details_errors"] = _count(
-                conn, "SELECT COUNT(*) FROM candidates WHERE details_status='error'"
+            metrics["candidates"]["current_details_errors"] = _scalar(
+                conn,
+                "SELECT COUNT(*) FROM candidates WHERE details_status='error'",
             )
-            metrics["candidates"]["current_draft_errors"] = _count(
-                conn, "SELECT COUNT(*) FROM candidates WHERE draft_status='error'"
+            metrics["candidates"]["current_draft_errors"] = _scalar(
+                conn,
+                "SELECT COUNT(*) FROM candidates WHERE draft_status='error'",
             )
-
-            metrics["responses"]["sent"] = _count(
+            metrics["responses"]["sent"] = _scalar(
                 conn,
                 "SELECT COUNT(*) FROM candidates WHERE send_status='sent' "
                 "AND sent_at>=? AND sent_at<?",
                 (start_ts, end_ts),
             )
-            metrics["responses"]["unknown"] = _count(
+            metrics["responses"]["unknown"] = _scalar(
                 conn,
                 "SELECT COUNT(*) FROM candidates WHERE send_status='unknown' "
                 "AND sent_at>=? AND sent_at<?",
                 (start_ts, end_ts),
             )
+
             if _column_exists(conn, "candidates", "paid_rub"):
-                metrics["responses"]["recorded_paid_rub"] = _sum_int(
+                metrics["responses"]["recorded_paid_rub"] = _scalar(
                     conn,
                     "SELECT COALESCE(SUM(paid_rub), 0) FROM candidates "
                     "WHERE send_status IN ('sent','unknown') AND sent_at>=? AND sent_at<?",
                     (start_ts, end_ts),
                 )
-                metrics["responses"]["missing_payment_records"] = _count(
+                metrics["responses"]["missing_payment_records"] = _scalar(
                     conn,
-                    "SELECT COUNT(*) FROM candidates WHERE send_status IN ('sent','unknown') "
-                    "AND sent_at>=? AND sent_at<? AND paid_rub IS NULL",
+                    "SELECT COUNT(*) FROM candidates "
+                    "WHERE send_status IN ('sent','unknown') AND sent_at>=? "
+                    "AND sent_at<? AND paid_rub IS NULL",
                     (start_ts, end_ts),
                 )
             if _column_exists(conn, "candidates", "respond_mode"):
-                metrics["responses"]["modes"] = _group_counts(
+                metrics["responses"]["modes"] = _groups(
                     conn,
                     "SELECT COALESCE(respond_mode, 'unknown'), COUNT(*) FROM candidates "
                     "WHERE send_status IN ('sent','unknown') AND sent_at>=? AND sent_at<? "
@@ -272,27 +279,29 @@ def _db_metrics(path: Path, start_ts: int, end_ts: int) -> dict:
                 )
 
         if _table_exists(conn, "chat_log"):
-            common = "created_at>=? AND created_at<?"
             params = (start_ts, end_ts)
-            metrics["chat"]["tutor_replies"] = _count(
-                conn, f"SELECT COUNT(*) FROM chat_log WHERE sender='tutor' AND {common}", params
-            )
-            metrics["chat"]["needs_human"] = _count(
+            metrics["chat"]["tutor_replies"] = _scalar(
                 conn,
-                f"SELECT COUNT(*) FROM chat_log WHERE sender='system' "
-                f"AND text LIKE 'NEEDS_HUMAN:%' AND {common}",
+                "SELECT COUNT(*) FROM chat_log WHERE sender='tutor' "
+                "AND created_at>=? AND created_at<?",
                 params,
             )
-            metrics["chat"]["send_failed"] = _count(
+            metrics["chat"]["needs_human"] = _scalar(
                 conn,
-                f"SELECT COUNT(*) FROM chat_log WHERE sender='system' "
-                f"AND text LIKE 'SEND_FAILED:%' AND {common}",
+                "SELECT COUNT(*) FROM chat_log WHERE sender='system' "
+                "AND text LIKE 'NEEDS_HUMAN:%' AND created_at>=? AND created_at<?",
                 params,
             )
-            metrics["chat"]["injection_guard"] = _count(
+            metrics["chat"]["send_failed"] = _scalar(
                 conn,
-                f"SELECT COUNT(*) FROM chat_log WHERE sender='system' "
-                f"AND text LIKE 'INJECTION_GUARD:%' AND {common}",
+                "SELECT COUNT(*) FROM chat_log WHERE sender='system' "
+                "AND text LIKE 'SEND_FAILED:%' AND created_at>=? AND created_at<?",
+                params,
+            )
+            metrics["chat"]["injection_guard"] = _scalar(
+                conn,
+                "SELECT COUNT(*) FROM chat_log WHERE sender='system' "
+                "AND text LIKE 'INJECTION_GUARD:%' AND created_at>=? AND created_at<?",
                 params,
             )
     except sqlite3.Error:
@@ -330,11 +339,11 @@ def _scan_logs(root: Path, target: date) -> dict:
         current_date: str | None = None
         account = _log_account(path)
         try:
-            fh = path.open("r", encoding="utf-8", errors="replace")
+            handle = path.open("r", encoding="utf-8", errors="replace")
         except OSError:
             continue
-        with fh:
-            for line in fh:
+        with handle:
+            for line in handle:
                 match = LINE_DATE_RE.match(line)
                 if match:
                     current_date = match.group("date")
@@ -388,24 +397,22 @@ def build_report(root: Path, target: date, tz: ZoneInfo) -> dict:
     start_ts, end_ts = _window_epoch(target, tz)
     databases = _discover_databases(root)
     accounts = {
-        account: _db_metrics(path, start_ts, end_ts) for account, path in databases.items()
+        account: _db_metrics(path, start_ts, end_ts)
+        for account, path in databases.items()
     }
     logs = _scan_logs(root, target)
 
-    # Attach only already-sanitized event counters to matching technical accounts.
     per_account_log_events = logs.pop("events_by_account", {})
     for account, counters in per_account_log_events.items():
         if account == "global":
             continue
-        accounts.setdefault(account, _db_metrics(Path("/__missing__"), start_ts, end_ts))
+        accounts.setdefault(account, _empty_metrics())
         accounts[account]["log_events"] = counters
-    for metrics in accounts.values():
-        metrics.setdefault("log_events", {})
 
     return {
         "schema_version": 1,
         "date": target.isoformat(),
-        "timezone": str(tz.key),
+        "timezone": tz.key,
         "generated_at": datetime.now(tz).isoformat(timespec="seconds"),
         "code_revision": _git_revision(root),
         "privacy": {
@@ -424,18 +431,16 @@ def build_report(root: Path, target: date, tz: ZoneInfo) -> dict:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Build privacy-safe daily Profi ops snapshot")
+    parser = argparse.ArgumentParser(
+        description="Build privacy-safe daily Profi ops snapshot"
+    )
     parser.add_argument(
         "--root",
         type=Path,
         default=Path(__file__).resolve().parents[2],
         help="repository root (default: auto-detected)",
     )
-    parser.add_argument(
-        "--date",
-        default="today",
-        help="today, yesterday or YYYY-MM-DD",
-    )
+    parser.add_argument("--date", default="today", help="today, yesterday or YYYY-MM-DD")
     parser.add_argument(
         "--timezone",
         default=DEFAULT_TIMEZONE,
@@ -456,7 +461,6 @@ def main() -> int:
     report_path.write_text(payload, encoding="utf-8")
     latest_path.write_text(payload, encoding="utf-8")
 
-    # Stable machine-readable output for daily_publish.sh.
     print(report_path.relative_to(root))
     return 0
 
