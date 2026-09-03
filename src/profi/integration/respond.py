@@ -264,7 +264,21 @@ def click_send(order_page: Page, ctx: BrowserContext, rate: int | None = None) -
                 raise RespondError(f"мусор в форме перед отправкой: {bad!r}")
         human_pause(1.5, 3.0)
         btn.first.click(delay=random.randint(80, 160))
-        order_page.wait_for_timeout(6000)
+        order_page.wait_for_timeout(3000)
+        # Профи показывает модалку «Сохранить способ оплаты?» (СБП) — отклик
+        # не уходит, пока её не закрыть (инцидент #93457447: клик был, rpc
+        # 200, редиректа нет). Жмём «В другой раз»: автосохранение платёжки
+        # = будущие списания без подтверждения банка, нам не нужно.
+        try:
+            if order_page.get_by_text("Сохранить способ оплаты", exact=False).count() > 0:
+                log.info("модалка «Сохранить способ оплаты?» — жму «В другой раз»")
+                order_page.get_by_text("В другой раз", exact=True).first.click(
+                    delay=random.randint(60, 120)
+                )
+                order_page.wait_for_timeout(3000)
+        except Exception:
+            pass
+        order_page.wait_for_timeout(3000)
         outcome = {
             "rpc": rpc_events,
             "url_after": order_page.url[:120],
