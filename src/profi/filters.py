@@ -41,6 +41,11 @@ def hard_filter(s: OrderSnippet) -> FilterVerdict:
     if any(p in text or p in badges_text for p in config.SPECIAL_NEEDS_PATTERNS):
         return FilterVerdict(False, "особые потребности (СДВГ/аутизм и смежное)")
 
+    hit = next((p for p in config.STOP_PATTERNS if p in text or p in badges_text), None)
+    if hit:
+        # паттерн в reason — ложные срабатывания видны в логе скипов
+        return FilterVerdict(False, f"стоп-слово {hit!r}")
+
     if config.SUBJECT_KEYWORDS and not any(k in text for k in config.SUBJECT_KEYWORDS):
         return FilterVerdict(False, "предмет не совпал")
 

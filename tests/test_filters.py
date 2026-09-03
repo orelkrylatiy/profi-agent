@@ -27,6 +27,7 @@ def filter_rules(monkeypatch):
     monkeypatch.setattr(config, "VACANCY_PATTERNS", ["ваканс"])
     monkeypatch.setattr(config, "REMOTE_ONLY", True)
     monkeypatch.setattr(config, "MIN_RATE", None)
+    monkeypatch.setattr(config, "STOP_PATTERNS", [])
 
 
 class TestParsePriceMax:
@@ -91,3 +92,36 @@ class TestHardFilter:
         s = make_snippet(price_raw="до 400 ₽", geo_remote="Дистанционно")
         v = hard_filter(s)
         assert not v.passed and "бюджет" in v.reason
+
+
+class TestStopPatterns:
+    """Стоп-слова акка (PROFI_STOP_PATTERNS): заказы-не-уроки режутся до LLM."""
+
+    def test_interview_prep_skipped(self, monkeypatch):
+        monkeypatch.setattr(config, "STOP_PATTERNS", ["собеседован"])
+        s = make_snippet(title="Английский для собеседования", geo_remote="Дистанционно")
+        v = hard_filter(s)
+        assert not v.passed and "стоп-слово" in v.reason
+
+    @pytest.mark.parametrize(
+        "description",
+        [
+            "Подготовка к интервью по методике STAR, уровень Middle+",
+            "Job interview practice for a Senior developer",
+            "Нужен репетитор для сеньора, техническое интервью",
+        ],
+    )
+    def test_level_and_method_skipped(self, monkeypatch, description):
+        monkeypatch.setattr(
+            config,
+            "STOP_PATTERNS",
+            ["собеседован", "интервью", "interview", "star", "middle", "senior", "сеньор"],
+        )
+        s = make_snippet(description=description, geo_remote="Дистанционно")
+        v = hard_filter(s)
+        assert not v.passed and "стоп-слово" in v.reason
+
+    def test_empty_stop_patterns_passes(self):
+        # дефолт: список пуст — фильтр ничего не режет
+        s = make_snippet(geo_remote="Дистанционно")
+        assert hard_filter(s).passed

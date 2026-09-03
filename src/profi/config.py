@@ -86,9 +86,7 @@ LLM_COOLDOWN_FILE = DATA_DIR / (f"{LOG_TAG}.llm-cooldown" if LOG_TAG else "llm-c
 PERSONA = _get("PROFI_PERSONA", "info")
 PERSONA_DIR = PROJECT_DIR / "personas"
 SUBJECT_KEYWORDS = [
-    s.strip()
-    for s in _get("PROFI_SUBJECTS", "информатик,программирован,математик").split(",")
-    if s.strip()
+    s.strip() for s in _get("PROFI_SUBJECTS", "информатик,программирован").split(",") if s.strip()
 ]
 
 # --- Chrome (правило: один аккаунт = один user-data-dir, свой CDP-порт) ---
@@ -153,6 +151,13 @@ BARTER_PATTERNS = [
     "взаимозачет",
     "бесплатн",
 ]
+# Стоп-слова акка (PROFI_STOP_PATTERNS, через запятую): заказы не нашего
+# профиля по смыслу. Для lang (англ) — подготовка к собеседованиям уровня
+# Middle+/Senior, STAR-методика и т.п. (решение Макса 04.09): это HR-тренинг,
+# а не уроки языка. Подстроки, как у прочих паттернов: «star» ловит и
+# «STAR-методика», и «star interview» (латинское «start» в заказах площадки
+# не встречается — заказы пишутся по-русски).
+STOP_PATTERNS = [s.strip().lower() for s in _get("PROFI_STOP_PATTERNS", "").split(",") if s.strip()]
 REMOTE_ONLY = True  # geo.remote пуст → только очно → skip
 
 # --- Денежные предохранители (RULES.md §2; ревью P0-2) ---
