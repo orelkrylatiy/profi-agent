@@ -1,0 +1,94 @@
+name: Fast-path review fixes
+
+on:
+  push:
+    branches: [feature/fast-path-fallback-20260904]
+
+permissions:
+  contents: write
+
+jobs:
+  review-fixes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.11"
+
+      - name: Apply review fixes
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          main = Path("src/profi/main.py")
+          text = main.read_text(encoding="utf-8")
+          old = 'def run_cycle(bm: BrowserManager, store: Store) -> str:\n'
+          new = 'def run_cycle(\n    bm: BrowserManager, store: Store, *, fast_path: bool | None = None\n) -> str:\n'
+          if old in text:
+              text = text.replace(old, new, 1)
+          elif new not in text:
+              raise SystemExit("run_cycle signature not found")
+
+          old = '''    fresh = passed = skipped = 0\n    for s in snap.snippets:\n'''
+          new = '''    use_fast_path = config.FAST_PATH_ENABLED if fast_path is None else fast_path\n    fresh = passed = skipped = 0\n    for s in snap.snippets:\n'''
+          if old in text:
+              text = text.replace(old, new, 1)
+          elif "use_fast_path = config.FAST_PATH_ENABLED" not in text:
+              raise SystemExit("run_cycle fast-path selector anchor not found")
+
+          text = text.replace(
+              'load_details(bm, store, s.id, fast_path=config.FAST_PATH_ENABLED)',
+              'load_details(bm, store, s.id, fast_path=use_fast_path)',
+              1,
+          )
+          old = '        state = run_cycle(bm, store)\n        if state == AUTH_REQUIRED:\n'
+          new = '        state = run_cycle(bm, store, fast_path=False)\n        if state == AUTH_REQUIRED:\n'
+          if old in text:
+              text = text.replace(old, new, 1)
+          elif "run_cycle(bm, store, fast_path=False)" not in text:
+              raise SystemExit("run_once call anchor not found")
+          main.write_text(text, encoding="utf-8")
+
+          fp = Path("src/profi/fastpath.py")
+          text = fp.read_text(encoding="utf-8")
+          old = '''    position = details.get("competition_position")\n    if (\n        config.MAX_COMPETITION_POSITION\n        and position is not None\n        and int(position) > config.MAX_COMPETITION_POSITION\n    ):\n        return f"позиция {position} > {config.MAX_COMPETITION_POSITION}"\n'''
+          new = '''    position = details.get("competition_position")\n    try:\n        numeric_position = int(position) if position is not None else None\n    except (TypeError, ValueError):\n        numeric_position = None\n    if (\n        config.MAX_COMPETITION_POSITION\n        and numeric_position is not None\n        and numeric_position > config.MAX_COMPETITION_POSITION\n    ):\n        return f"позиция {position} > {config.MAX_COMPETITION_POSITION}"\n'''
+          if old in text:
+              text = text.replace(old, new, 1)
+          elif "numeric_position" not in text:
+              raise SystemExit("competition position gate not found")
+
+          old = '''            verdict = llm_mod.json_reply(raw)\n        except Exception as exc:\n'''
+          new = '''            verdict = llm_mod.json_reply(raw)\n            if not isinstance(verdict, dict):\n                raise ValueError("LLM JSON reply must be an object")\n        except Exception as exc:\n'''
+          if old in text:
+              text = text.replace(old, new, 1)
+          elif "LLM JSON reply must be an object" not in text:
+              raise SystemExit("LLM verdict validation anchor not found")
+          fp.write_text(text, encoding="utf-8")
+          PY
+
+      - name: Install
+        run: uv sync
+      - name: Autofix and format
+        run: |
+          uv run ruff check --fix src/profi/main.py src/profi/fastpath.py tests/test_fast_path_review.py
+          uv run ruff format src/profi/main.py src/profi/fastpath.py tests/test_fast_path_review.py
+      - name: Full gate
+        run: |
+          uv run ruff check .
+          git ls-files 'scripts/**/*.sh' | xargs -n1 shellcheck
+          uv run pytest -q
+          uv run ruff format --check .
+      - name: Commit validated fixes
+        run: |
+          if git diff --quiet; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/profi/main.py src/profi/fastpath.py tests/test_fast_path_review.py
+          git commit -m "fix: preserve scan-only once mode and fail-open parsing"
+          git push
