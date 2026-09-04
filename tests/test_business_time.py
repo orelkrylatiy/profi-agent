@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 from profi import config
@@ -27,15 +27,15 @@ def test_in_work_hours_uses_business_timezone_when_now_is_aware(monkeypatch):
     monkeypatch.setattr(config, "TIMEZONE_NAME", "Asia/Yekaterinburg")
     monkeypatch.setattr(config, "WORK_HOURS", (8, 23))
     # 03:30 UTC = 08:30 in Yekaterinburg.
-    assert in_work_hours(datetime(2026, 9, 4, 3, 30, tzinfo=timezone.utc)) is True
+    assert in_work_hours(datetime(2026, 9, 4, 3, 30, tzinfo=UTC)) is True
     # 17:59 UTC = 22:59 local, still inside; 18:00 UTC = 23:00 local, outside.
-    assert in_work_hours(datetime(2026, 9, 4, 17, 59, tzinfo=timezone.utc)) is True
-    assert in_work_hours(datetime(2026, 9, 4, 18, 0, tzinfo=timezone.utc)) is False
+    assert in_work_hours(datetime(2026, 9, 4, 17, 59, tzinfo=UTC)) is True
+    assert in_work_hours(datetime(2026, 9, 4, 18, 0, tzinfo=UTC)) is False
 
 
 def test_business_now_converts_aware_timestamp(monkeypatch):
     monkeypatch.setattr(config, "TIMEZONE_NAME", "Asia/Yekaterinburg")
-    local = business_now(datetime(2026, 9, 4, 20, 0, tzinfo=timezone.utc))
+    local = business_now(datetime(2026, 9, 4, 20, 0, tzinfo=UTC))
     assert (local.hour, local.day) == (1, 5)
 
 
@@ -49,8 +49,8 @@ def test_sends_today_uses_business_midnight_not_machine_timezone(tmp_path, monke
         store.set_send_status("inside", "sent")
 
         # Business day 2026-09-05 starts at 2026-09-04 19:00 UTC.
-        before = int(datetime(2026, 9, 4, 18, 59, tzinfo=timezone.utc).timestamp())
-        inside = int(datetime(2026, 9, 4, 19, 1, tzinfo=timezone.utc).timestamp())
+        before = int(datetime(2026, 9, 4, 18, 59, tzinfo=UTC).timestamp())
+        inside = int(datetime(2026, 9, 4, 19, 1, tzinfo=UTC).timestamp())
         store.conn.execute("UPDATE candidates SET sent_at=? WHERE order_id='before'", (before,))
         store.conn.execute("UPDATE candidates SET sent_at=? WHERE order_id='inside'", (inside,))
         store.conn.commit()
