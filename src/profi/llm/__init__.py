@@ -25,6 +25,17 @@ from profi.llm.client import (
 
 log = logging.getLogger("profi.llm.copy")
 
+_LEGACY_CHAT_INSTRUCTIONS = (
+    (
+        "Предложи 2–3 конкретных окна времени (с учётом текущего времени) или "
+        "спроси удобное; мягко веди диалог к пробному занятию. "
+    ),
+    (
+        "Если клиент торгуется по цене, требует гарантий/возвратов, жалуется "
+        "или тема вне обучения — ставь needs_human=true и reply оставь пустым. "
+    ),
+)
+
 
 def _copy_channel(system: str) -> str | None:
     if "ЦЕЛЬ отклика" in system:
@@ -32,6 +43,14 @@ def _copy_channel(system: str) -> str | None:
     if "ЦЕЛЬ переписки" in system:
         return "chat"
     return None
+
+
+def _normalize_chat_system(system: str) -> str:
+    """Remove obsolete chat rules before the provider sees the system prompt."""
+    normalized = system
+    for obsolete in _LEGACY_CHAT_INSTRUCTIONS:
+        normalized = normalized.replace(obsolete, "")
+    return normalized
 
 
 def _copy_text(raw: str, channel: str) -> str | None:
@@ -77,9 +96,10 @@ def chat(
 
     Outreach A/B/C composition is assigned before this layer and must remain
     unchanged across retries. Chat keeps a little non-experimental variation.
-    Chat handoff is temporarily disabled: the legacy ``needs_human`` field is
-    forced to false so old runtime code cannot silently consume a client turn.
-    The retry is best-effort: a style failure can never lose a usable lead.
+    Chat handoff is temporarily disabled: obsolete schedule/handoff rules are
+    removed before the provider call and the legacy ``needs_human`` field is
+    forced to false. The retry is best-effort: style failure cannot lose a
+    usable client response.
     """
     channel = _copy_channel(system)
     if channel is None:
@@ -92,7 +112,7 @@ def chat(
             system if OUTREACH_EXPERIMENT_MARKER in system else system + OUTREACH_STYLE_OVERRIDE
         )
     else:
-        styled_system = system + CHAT_STYLE_OVERRIDE + style_variation("chat")
+        styled_system = _normalize_chat_system(system) + CHAT_STYLE_OVERRIDE + style_variation("chat")
 
     first = _chat(styled_system, user, temperature, max_tokens, model)
     first_text = _copy_text(first, channel)
