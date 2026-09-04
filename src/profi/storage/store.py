@@ -56,7 +56,7 @@ CREATE TABLE IF NOT EXISTS chat_log (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     order_id     TEXT,
     client_name  TEXT,
-    sender       TEXT NOT NULL,          -- client / tutor / system
+    sender       TEXT NOT NULL,
     text         TEXT,
     created_at   INTEGER NOT NULL
 );
@@ -150,14 +150,12 @@ GROUP BY prompt_experiment, prompt_variant;
 
 class Store:
     def __init__(self, db_path):
-        # WAL + timeout: worker and autopilot may still touch one DB from two processes.
         self.conn = sqlite3.connect(db_path, timeout=30)
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("PRAGMA busy_timeout=30000")
         self.conn.row_factory = sqlite3.Row
         self.conn.executescript(TABLE_SCHEMA)
 
-        # Live DB migrations. CREATE TABLE IF NOT EXISTS does not add columns.
         for ddl in (
             "ALTER TABLE candidates ADD COLUMN respond_mode TEXT",
             "ALTER TABLE candidates ADD COLUMN paid_rub INTEGER",
@@ -172,21 +170,16 @@ class Store:
         ):
             try:
                 self.conn.execute(ddl)
-            except sqlite3.OperationalError:  # column already exists
+            except sqlite3.OperationalError:
                 pass
 
-        # Views are disposable derived state. Rebuild after migrations so old DBs
-        # immediately expose the new experiment columns.
         self.conn.executescript(VIEW_SCHEMA)
         self.conn.commit()
 
     def close(self):
         self.conn.close()
 
-    # --- feed_seen ---
-
     def register_feed_seen(self, order_id: str, last_update: int | None) -> str:
-        """Persist feed observation and return NEW / UPDATED / UNCHANGED."""
         now = int(time.time())
         lu = last_update if last_update is not None else 0
         row = self.conn.execute(
@@ -212,8 +205,6 @@ class Store:
         )
         self.conn.commit()
         return "UNCHANGED"
-
-    # --- candidates ---
 
     def create_candidate(self, snippet, triage_reason: str | None, priority: int | None) -> None:
         now = int(time.time())
@@ -245,7 +236,6 @@ class Store:
         self.conn.commit()
 
     def update_details_for_fast_path(self, order_id: str, details_json: str) -> None:
-        """Persist details and atomically claim draft stage for worker fast-path."""
         now = int(time.time())
         self.conn.execute(
             "UPDATE candidates SET details_status='ready', details_json=?, details_loaded_at=?, "
@@ -257,12 +247,7 @@ class Store:
     def assign_prompt_variant(
         self, order_id: str, experiment_id: str, variants: tuple[str, ...] | list[str]
     ) -> str:
-        """Assign one stable A/B/C arm and persist it before any LLM call.
-
-        SHA-256 gives random-looking balanced assignment while retries and process
-        restarts always resolve to the same arm. An already assigned order is never
-        moved to a newer experiment implicitly.
-        """
+        """Assign one stable pseudo-random experiment arm before any LLM call."""
         choices = tuple(dict.fromkeys(str(v) for v in variants if str(v)))
         if not choices:
             raise ValueError("prompt experiment requires at least one variant")
@@ -276,7 +261,7 @@ class Store:
         if row["prompt_variant"]:
             return str(row["prompt_variant"])
 
-        digest = hashlib.sha256(f"{experiment_id}:{order_id}".encode("utf-8")).digest()
+        digest = hashlib.sha256(f"{experiment_id}:{order_id}".encode()).digest()
         variant = choices[int.from_bytes(digest[:8], "big") % len(choices)]
         now = int(time.time())
         self.conn.execute(
@@ -345,7 +330,6 @@ class Store:
         return cur.rowcount == 1
 
     def claim_send(self, order_id: str) -> bool:
-        """Atomically transition not_sent -> sending; only one process can win."""
         now = int(time.time())
         cur = self.conn.execute(
             "UPDATE candidates SET send_status='sending', updated_at=? "
@@ -356,7 +340,6 @@ class Store:
         return cur.rowcount == 1
 
     def set_send_status(self, order_id: str, status: str) -> bool:
-        """Set send lifecycle state."""
         now = int(time.time())
         cur = self.conn.execute(
             "UPDATE candidates SET send_status = ?, "
@@ -368,7 +351,6 @@ class Store:
         return cur.rowcount > 0
 
     def record_response(self, order_id: str, mode: str, paid_rub: int | None) -> None:
-        """Persist tariff mode and actual up-front spend for a response."""
         self.conn.execute(
             "UPDATE candidates SET respond_mode = ?, paid_rub = ?, updated_at = ? "
             "WHERE order_id = ?",
@@ -377,11 +359,25 @@ class Store:
         self.conn.commit()
 
     def log_chat(self, order_id: str | None, client_name: str, sender: str, text: str) -> None:
+        """Persist chat event and infer first client reply from auto-chat handling.
+
+        Runtime only writes tutor/system chat events after opening an unread dialog
+        whose last message is the client's. Therefore the first such event after a
+        confirmed outreach is also a privacy-preserving reply observation: timestamp
+        only, no incoming client text is copied into candidates.
+        """
+        now = int(time.time())
         self.conn.execute(
             "INSERT INTO chat_log (order_id, client_name, sender, text, created_at) "
             "VALUES (?, ?, ?, ?, ?)",
-            (order_id, client_name, sender, text, int(time.time())),
+            (order_id, client_name, sender, text, now),
         )
+        if order_id and sender in {"tutor", "system"}:
+            self.conn.execute(
+                "UPDATE candidates SET first_client_reply_at=?, updated_at=? "
+                "WHERE order_id=? AND sent_at IS NOT NULL AND first_client_reply_at IS NULL",
+                (now, now, order_id),
+            )
         self.conn.commit()
 
     def last_chat_sent_at(self, order_id: str) -> int | None:
@@ -401,7 +397,6 @@ class Store:
         return cur.rowcount > 0
 
     def sends_today(self) -> int:
-        """Number of sent/unknown paid attempts since local midnight."""
         import datetime as _dt
 
         midnight = int(
@@ -415,7 +410,6 @@ class Store:
         return int(row[0])
 
     def ensure_candidate(self, order_id: str, title: str | None) -> None:
-        """Create a minimal candidate if missing without resetting existing state."""
         now = int(time.time())
         self.conn.execute(
             "INSERT OR IGNORE INTO candidates "
