@@ -41,6 +41,10 @@ def hard_filter(s: OrderSnippet) -> FilterVerdict:
     if any(p in text or p in badges_text for p in config.SPECIAL_NEEDS_PATTERNS):
         return FilterVerdict(False, "особые потребности (СДВГ/аутизм и смежное)")
 
+    # очные занятия — не наш формат; regex: не задеваем «заочно»
+    if any(re.search(p, text) for p in config.ONSITE_PATTERNS):
+        return FilterVerdict(False, "очные занятия (мы дистанционные)")
+
     hit = next((p for p in config.STOP_PATTERNS if p in text or p in badges_text), None)
     if hit:
         # паттерн в reason — ложные срабатывания видны в логе скипов
