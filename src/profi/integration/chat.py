@@ -168,11 +168,9 @@ def select_reply_targets(dialogs: list[dict], limit: int = 2) -> list[dict]:
     `not d.get("last_is_ours")` опасно: отсутствующий/неразобранный признак
     (None) превращается в True и запускает ответ. Здесь нужен именно `is False`.
     """
-    return [
-        d
-        for d in dialogs
-        if int(d.get("unread") or 0) > 0 and d.get("last_is_ours") is False
-    ][: max(0, limit)]
+    return [d for d in dialogs if int(d.get("unread") or 0) > 0 and d.get("last_is_ours") is False][
+        : max(0, limit)
+    ]
 
 
 def open_dialog_by_name(page: Page, name: str) -> str:
