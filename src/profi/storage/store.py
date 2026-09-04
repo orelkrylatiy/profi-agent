@@ -1,16 +1,13 @@
-"""SQLite: техническая память feed_seen + бизнесовая таблица candidates.
-
-Спека: разд. 13 (dedup/idempotency), 17 (candidates), 18 (статусы),
-25 (lifecycle). Схема не «богаче» спеки без причины.
-"""
+"""SQLite: technical feed memory, candidate lifecycle and outreach analytics."""
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 import time
 
-SCHEMA = """
+TABLE_SCHEMA = """
 CREATE TABLE IF NOT EXISTS feed_seen (
     order_id       TEXT PRIMARY KEY,
     last_update    INTEGER NOT NULL,
@@ -39,9 +36,19 @@ CREATE TABLE IF NOT EXISTS candidates (
     draft_source           TEXT,
     draft_generated_at     INTEGER,
 
+    prompt_experiment      TEXT,
+    prompt_variant         TEXT,
+    prompt_assigned_at     INTEGER,
+    first_reply_text       TEXT,
+    first_reply_source     TEXT,
+    first_reply_at         INTEGER,
+    first_client_reply_at  INTEGER,
+
     send_status            TEXT NOT NULL,
     sent_at                INTEGER,
 
+    respond_mode           TEXT,
+    paid_rub               INTEGER,
     last_error             TEXT
 );
 
@@ -53,9 +60,11 @@ CREATE TABLE IF NOT EXISTS chat_log (
     text         TEXT,
     created_at   INTEGER NOT NULL
 );
+"""
 
--- плоская статистика откликов поверх той же таблицы (вторая БД не нужна)
-CREATE VIEW IF NOT EXISTS v_responses AS
+VIEW_SCHEMA = """
+DROP VIEW IF EXISTS v_responses;
+CREATE VIEW v_responses AS
 SELECT
     order_id,
     title,
@@ -68,15 +77,69 @@ SELECT
     length(draft_text)                                          AS text_len,
     draft_text,
     draft_source,
+    prompt_experiment,
+    prompt_variant,
+    first_reply_text,
+    first_reply_source,
+    datetime(first_reply_at, 'unixepoch', 'localtime') AS first_reply_at,
+    datetime(first_client_reply_at, 'unixepoch', 'localtime') AS first_client_reply_at,
     respond_mode,
     paid_rub,
-    -- что реально заплатили: запись отправки > цена платного тарифа из карточки
-    -- (алиас в этом же SELECT недоступен — повторяем выражение)
     COALESCE(
         paid_rub,
         CAST(json_extract(details_json, '$.bid_price') AS INTEGER)
-    )                                                            AS paid
+    ) AS paid
 FROM candidates;
+
+DROP VIEW IF EXISTS v_prompt_experiments;
+CREATE VIEW v_prompt_experiments AS
+SELECT
+    prompt_experiment,
+    prompt_variant,
+    COUNT(*) AS assigned,
+    SUM(CASE WHEN first_reply_source = 'llm' AND first_reply_text IS NOT NULL THEN 1 ELSE 0 END)
+        AS generated,
+    SUM(CASE WHEN first_reply_source = 'fallback' AND first_reply_text IS NOT NULL THEN 1 ELSE 0 END)
+        AS fallbacks,
+    SUM(CASE WHEN first_reply_source = 'llm' AND send_status = 'sent' THEN 1 ELSE 0 END)
+        AS sent,
+    SUM(
+        CASE
+            WHEN first_reply_source = 'llm'
+             AND send_status = 'sent'
+             AND first_client_reply_at IS NOT NULL
+            THEN 1 ELSE 0
+        END
+    ) AS replied,
+    ROUND(
+        100.0 * SUM(
+            CASE
+                WHEN first_reply_source = 'llm'
+                 AND send_status = 'sent'
+                 AND first_client_reply_at IS NOT NULL
+                THEN 1 ELSE 0
+            END
+        ) / NULLIF(
+            SUM(CASE WHEN first_reply_source = 'llm' AND send_status = 'sent' THEN 1 ELSE 0 END),
+            0
+        ),
+        1
+    ) AS reply_rate_pct,
+    ROUND(
+        AVG(
+            CASE
+                WHEN first_reply_source = 'llm'
+                 AND send_status = 'sent'
+                 AND first_client_reply_at IS NOT NULL
+                 AND sent_at IS NOT NULL
+                THEN (first_client_reply_at - sent_at) / 60.0
+            END
+        ),
+        1
+    ) AS avg_reply_min
+FROM candidates
+WHERE prompt_experiment IS NOT NULL AND prompt_variant IS NOT NULL
+GROUP BY prompt_experiment, prompt_variant;
 """
 
 # feed_seen: NEW / UPDATED / UNCHANGED
@@ -87,31 +150,34 @@ FROM candidates;
 
 class Store:
     def __init__(self, db_path):
-        # WAL + таймаут: воркер и автопилот пишут в одну БД из двух процессов
-        # (ревью P2) — без этого редкие "database is locked"
+        # WAL + timeout: worker and autopilot may still touch one DB from two processes.
         self.conn = sqlite3.connect(db_path, timeout=30)
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("PRAGMA busy_timeout=30000")
         self.conn.row_factory = sqlite3.Row
-        # v_responses пересоздаём: CREATE VIEW IF NOT EXISTS не обновляет
-        # определение в живых БД (инцидент: stats без колонки paid)
-        self.conn.execute("DROP VIEW IF EXISTS v_responses")
-        self.conn.executescript(SCHEMA)
-        # миграции живых БД: новые колонки добавляем на месте (schema FROM
-        # IF NOT EXISTS не апгрейдит существующие таблицы)
+        self.conn.executescript(TABLE_SCHEMA)
+
+        # Live DB migrations. CREATE TABLE IF NOT EXISTS does not add columns.
         for ddl in (
             "ALTER TABLE candidates ADD COLUMN respond_mode TEXT",
             "ALTER TABLE candidates ADD COLUMN paid_rub INTEGER",
             "ALTER TABLE candidates ADD COLUMN draft_source TEXT",
+            "ALTER TABLE candidates ADD COLUMN prompt_experiment TEXT",
+            "ALTER TABLE candidates ADD COLUMN prompt_variant TEXT",
+            "ALTER TABLE candidates ADD COLUMN prompt_assigned_at INTEGER",
+            "ALTER TABLE candidates ADD COLUMN first_reply_text TEXT",
+            "ALTER TABLE candidates ADD COLUMN first_reply_source TEXT",
+            "ALTER TABLE candidates ADD COLUMN first_reply_at INTEGER",
+            "ALTER TABLE candidates ADD COLUMN first_client_reply_at INTEGER",
         ):
             try:
                 self.conn.execute(ddl)
-            except sqlite3.OperationalError:  # колонка уже есть
+            except sqlite3.OperationalError:  # column already exists
                 pass
-        # VIEW создавался до ALTER для старой БД и мог упасть на draft_source.
-        # После миграций гарантированно пересобираем его уже на актуальной схеме.
-        self.conn.execute("DROP VIEW IF EXISTS v_responses")
-        self.conn.executescript(SCHEMA)
+
+        # Views are disposable derived state. Rebuild after migrations so old DBs
+        # immediately expose the new experiment columns.
+        self.conn.executescript(VIEW_SCHEMA)
         self.conn.commit()
 
     def close(self):
@@ -120,7 +186,7 @@ class Store:
     # --- feed_seen ---
 
     def register_feed_seen(self, order_id: str, last_update: int | None) -> str:
-        """Фиксирует заказ в feed_seen и возвращает NEW / UPDATED / UNCHANGED."""
+        """Persist feed observation and return NEW / UPDATED / UNCHANGED."""
         now = int(time.time())
         lu = last_update if last_update is not None else 0
         row = self.conn.execute(
@@ -179,11 +245,7 @@ class Store:
         self.conn.commit()
 
     def update_details_for_fast_path(self, order_id: str, details_json: str) -> None:
-        """Persist full details and atomically claim the draft stage for worker fast-path.
-
-        Legacy autopilot only selects draft_status='pending', therefore there is no
-        ready/pending race window where it can reopen the same fresh order.
-        """
+        """Persist details and atomically claim draft stage for worker fast-path."""
         now = int(time.time())
         self.conn.execute(
             "UPDATE candidates SET details_status='ready', details_json=?, details_loaded_at=?, "
@@ -191,6 +253,44 @@ class Store:
             (details_json, now, now, order_id),
         )
         self.conn.commit()
+
+    def assign_prompt_variant(
+        self, order_id: str, experiment_id: str, variants: tuple[str, ...] | list[str]
+    ) -> str:
+        """Assign one stable A/B/C arm and persist it before any LLM call.
+
+        SHA-256 gives random-looking balanced assignment while retries and process
+        restarts always resolve to the same arm. An already assigned order is never
+        moved to a newer experiment implicitly.
+        """
+        choices = tuple(dict.fromkeys(str(v) for v in variants if str(v)))
+        if not choices:
+            raise ValueError("prompt experiment requires at least one variant")
+
+        row = self.conn.execute(
+            "SELECT prompt_experiment, prompt_variant FROM candidates WHERE order_id=?",
+            (order_id,),
+        ).fetchone()
+        if row is None:
+            raise ValueError(f"candidate {order_id} not found")
+        if row["prompt_variant"]:
+            return str(row["prompt_variant"])
+
+        digest = hashlib.sha256(f"{experiment_id}:{order_id}".encode("utf-8")).digest()
+        variant = choices[int.from_bytes(digest[:8], "big") % len(choices)]
+        now = int(time.time())
+        self.conn.execute(
+            "UPDATE candidates SET prompt_experiment=?, prompt_variant=?, prompt_assigned_at=?, "
+            "updated_at=? WHERE order_id=? AND prompt_variant IS NULL",
+            (experiment_id, variant, now, now, order_id),
+        )
+        self.conn.commit()
+        actual = self.conn.execute(
+            "SELECT prompt_variant FROM candidates WHERE order_id=?", (order_id,)
+        ).fetchone()
+        if actual is None or not actual["prompt_variant"]:
+            raise RuntimeError(f"failed to assign prompt variant for {order_id}")
+        return str(actual["prompt_variant"])
 
     def set_draft(
         self,
@@ -201,7 +301,7 @@ class Store:
         source: str | None = None,
         error: str | None = None,
     ) -> bool:
-        """Persist draft lifecycle and origin (llm/fallback) without losing prior text."""
+        """Persist mutable draft state plus immutable first outreach copy."""
         now = int(time.time())
         cur = self.conn.execute(
             "UPDATE candidates SET draft_status=?, "
@@ -224,8 +324,25 @@ class Store:
                 order_id,
             ),
         )
+        if status == "generated" and text:
+            self.conn.execute(
+                "UPDATE candidates SET first_reply_text=?, first_reply_source=?, first_reply_at=? "
+                "WHERE order_id=? AND first_reply_text IS NULL",
+                (text, source, now, order_id),
+            )
         self.conn.commit()
         return cur.rowcount > 0
+
+    def mark_client_reply(self, order_id: str) -> bool:
+        """Record only the first observed client reply timestamp; no message text needed."""
+        now = int(time.time())
+        cur = self.conn.execute(
+            "UPDATE candidates SET first_client_reply_at=?, updated_at=? "
+            "WHERE order_id=? AND sent_at IS NOT NULL AND first_client_reply_at IS NULL",
+            (now, now, order_id),
+        )
+        self.conn.commit()
+        return cur.rowcount == 1
 
     def claim_send(self, order_id: str) -> bool:
         """Atomically transition not_sent -> sending; only one process can win."""
@@ -239,11 +356,7 @@ class Store:
         return cur.rowcount == 1
 
     def set_send_status(self, order_id: str, status: str) -> bool:
-        """Set send lifecycle state.
-
-        sent/unknown are irreversible paid-attempt states and consume the daily
-        limit. skipped/failed are terminal without retry; sending is an atomic claim.
-        """
+        """Set send lifecycle state."""
         now = int(time.time())
         cur = self.conn.execute(
             "UPDATE candidates SET send_status = ?, "
@@ -255,8 +368,7 @@ class Store:
         return cur.rowcount > 0
 
     def record_response(self, order_id: str, mode: str, paid_rub: int | None) -> None:
-        """Факт отправки для денежной аналитики: режим тарифа и сколько
-        реально заплатили (комиссия = 0 вперёд, Профи берёт % с занятий)."""
+        """Persist tariff mode and actual up-front spend for a response."""
         self.conn.execute(
             "UPDATE candidates SET respond_mode = ?, paid_rub = ?, updated_at = ? "
             "WHERE order_id = ?",
@@ -280,7 +392,7 @@ class Store:
         return row[0] if row and row[0] else None
 
     def set_note(self, order_id: str, note: str) -> bool:
-        """Краткое описание/резон решения от LLM (кладём в triage_reason)."""
+        """Internal decision/debug note; not the primary outreach analytics field."""
         cur = self.conn.execute(
             "UPDATE candidates SET triage_reason = ?, updated_at = ? WHERE order_id = ?",
             (note, int(time.time()), order_id),
@@ -289,7 +401,7 @@ class Store:
         return cur.rowcount > 0
 
     def sends_today(self) -> int:
-        """Сколько откликов отправлено/неопределённо с начала суток."""
+        """Number of sent/unknown paid attempts since local midnight."""
         import datetime as _dt
 
         midnight = int(
@@ -303,7 +415,7 @@ class Store:
         return int(row[0])
 
     def ensure_candidate(self, order_id: str, title: str | None) -> None:
-        """Минимальная запись кандидата, если её ещё нет (не сбрасывает статусы)."""
+        """Create a minimal candidate if missing without resetting existing state."""
         now = int(time.time())
         self.conn.execute(
             "INSERT OR IGNORE INTO candidates "
@@ -317,7 +429,8 @@ class Store:
     def list_candidates(self) -> list[sqlite3.Row]:
         return self.conn.execute(
             "SELECT order_id, title, priority, triage_reason, details_status, draft_status, "
-            "send_status, updated_at FROM candidates ORDER BY updated_at DESC"
+            "send_status, prompt_experiment, prompt_variant, updated_at "
+            "FROM candidates ORDER BY updated_at DESC"
         ).fetchall()
 
     def get_candidate(self, order_id: str) -> sqlite3.Row | None:
