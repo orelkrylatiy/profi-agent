@@ -18,18 +18,19 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Apply work-hours gates
+      - name: Apply work-hours gates and stabilize existing send tests
         run: |
           python - <<'PY'
           from pathlib import Path
 
           path = Path("src/profi/fastpath.py")
           text = path.read_text(encoding="utf-8")
-          text = text.replace(
-              "from profi.utils import has_contacts\n",
-              "from profi.utils import has_contacts, in_work_hours\n",
-              1,
-          )
+          if "from profi.utils import has_contacts, in_work_hours" not in text:
+              text = text.replace(
+                  "from profi.utils import has_contacts\n",
+                  "from profi.utils import has_contacts, in_work_hours\n",
+                  1,
+              )
 
           start_anchor = '''    if config.DAILY_SEND_LIMIT and store.sends_today() >= config.DAILY_SEND_LIMIT:\n        return _terminal(\n'''
           start_gate = '''    if not in_work_hours():\n        return _terminal(\n            store,\n            order_id,\n            send_status="skipped",\n            draft_status="skipped",\n            note="скип: вне рабочих часов",\n        )\n\n    if config.DAILY_SEND_LIMIT and store.sends_today() >= config.DAILY_SEND_LIMIT:\n        return _terminal(\n'''
@@ -44,15 +45,30 @@ jobs:
               if text.count(click_anchor) != 1:
                   raise SystemExit(f"click gate anchor count={text.count(click_anchor)}")
               text = text.replace(click_anchor, click_gate, 1)
-
           path.write_text(text, encoding="utf-8")
+
+          # Existing happy/error send unit tests previously depended on wall clock.
+          # Make their precondition explicit; dedicated work-hours tests own boundary behavior.
+          for test_path in (Path("tests/test_fast_path.py"), Path("tests/test_fast_path_edges.py")):
+              test = test_path.read_text(encoding="utf-8")
+              fixture = '''\n\n@pytest.fixture(autouse=True)\ndef _fastpath_inside_work_hours(monkeypatch):\n    import profi.fastpath as fastpath\n\n    monkeypatch.setattr(fastpath, "in_work_hours", lambda: True)\n'''
+              if "def _fastpath_inside_work_hours" not in test:
+                  # Both files already import pytest; place fixture before helpers/classes.
+                  if "ROOT = " in test:
+                      idx = test.index("ROOT = ")
+                      test = test[:idx] + fixture + "\n" + test[idx:]
+                  else:
+                      marker = "\n\ndef _details"
+                      idx = test.index(marker)
+                      test = test[:idx] + fixture + test[idx:]
+                  test_path.write_text(test, encoding="utf-8")
           PY
 
       - name: Install and full gate
         run: |
           uv sync
-          uv run ruff check --fix src/profi/fastpath.py tests/test_fast_path_workhours.py
-          uv run ruff format src/profi/fastpath.py tests/test_fast_path_workhours.py
+          uv run ruff check --fix src/profi/fastpath.py tests/test_fast_path.py tests/test_fast_path_edges.py tests/test_fast_path_workhours.py
+          uv run ruff format src/profi/fastpath.py tests/test_fast_path.py tests/test_fast_path_edges.py tests/test_fast_path_workhours.py
           uv run ruff check .
           git ls-files 'scripts/**/*.sh' | xargs -n1 shellcheck
           uv run pytest -q
@@ -65,6 +81,6 @@ jobs:
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/profi/fastpath.py tests/test_fast_path_workhours.py
+          git add src/profi/fastpath.py tests/test_fast_path.py tests/test_fast_path_edges.py tests/test_fast_path_workhours.py
           git commit -m "fix: recheck work hours before fast-path send"
           git push
