@@ -163,7 +163,7 @@ def load_details(
             pass
 
 
-def run_cycle(bm: BrowserManager, store: Store) -> str:
+def run_cycle(bm: BrowserManager, store: Store, *, fast_path: bool | None = None) -> str:
     """Один worker cycle. Возвращает состояние, в котором остановились."""
     state = bm.ensure_ready()
     if state != "READY":
@@ -200,6 +200,7 @@ def run_cycle(bm: BrowserManager, store: Store) -> str:
         snap.server_ts,
     )
 
+    use_fast_path = config.FAST_PATH_ENABLED if fast_path is None else fast_path
     fresh = passed = skipped = 0
     for s in snap.snippets:
         status = store.register_feed_seen(s.id, s.last_update)
@@ -213,7 +214,7 @@ def run_cycle(bm: BrowserManager, store: Store) -> str:
                 store.create_candidate(s, "rule-pass (LLM-триаж — M3)", None)
                 log.info("#%s → candidate", s.id)
                 if config.AUTO_LOAD_DETAILS:
-                    load_details(bm, store, s.id, fast_path=config.FAST_PATH_ENABLED)
+                    load_details(bm, store, s.id, fast_path=use_fast_path)
         else:
             skipped += 1
         badge = ",".join(s.badges) if s.badges else "-"
@@ -311,7 +312,7 @@ def run_once() -> int:
         if state == BROWSER_OFFLINE:
             return 1
         log.info("стартовое состояние: %s", state)
-        state = run_cycle(bm, store)
+        state = run_cycle(bm, store, fast_path=False)
         if state == AUTH_REQUIRED:
             log.info(
                 ">>> Залогинься в Профи.ру в открывшемся Chrome и запусти ещё раз (или луп без --once)."

@@ -49,10 +49,14 @@ def full_gate_reason(details: dict) -> str | None:
         return f"цена отклика {bid_price} ₽ > {config.MAX_RESPONSE_PRICE_RUB} ₽"
 
     position = details.get("competition_position")
+    try:
+        numeric_position = int(position) if position is not None else None
+    except (TypeError, ValueError):
+        numeric_position = None
     if (
         config.MAX_COMPETITION_POSITION
-        and position is not None
-        and int(position) > config.MAX_COMPETITION_POSITION
+        and numeric_position is not None
+        and numeric_position > config.MAX_COMPETITION_POSITION
     ):
         return f"позиция {position} > {config.MAX_COMPETITION_POSITION}"
 
@@ -146,6 +150,8 @@ def decide_reply(
                 model=model,
             )
             verdict = llm_mod.json_reply(raw)
+            if not isinstance(verdict, dict):
+                raise ValueError("LLM JSON reply must be an object")
         except Exception as exc:
             last_error = exc
             try:
