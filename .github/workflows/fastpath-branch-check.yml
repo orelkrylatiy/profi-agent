@@ -59,6 +59,9 @@ jobs:
       - name: Install dependencies
         run: uv sync
 
+      - name: Ruff autofix
+        run: uv run ruff check --fix src/profi/fastpath.py src/profi/main.py src/profi/storage/store.py tests/test_fast_path.py tests/test_fast_path_edges.py
+
       - name: Format changed Python
         run: uv run ruff format src/profi/fastpath.py src/profi/main.py src/profi/storage/store.py tests/test_fast_path.py tests/test_fast_path_edges.py
 
