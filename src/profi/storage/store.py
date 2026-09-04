@@ -45,6 +45,7 @@ CREATE TABLE IF NOT EXISTS candidates (
     first_client_reply_at  INTEGER,
 
     send_status            TEXT NOT NULL,
+    send_started_at        INTEGER,
     sent_at                INTEGER,
 
     respond_mode           TEXT,
@@ -167,6 +168,7 @@ class Store:
             "ALTER TABLE candidates ADD COLUMN first_reply_source TEXT",
             "ALTER TABLE candidates ADD COLUMN first_reply_at INTEGER",
             "ALTER TABLE candidates ADD COLUMN first_client_reply_at INTEGER",
+            "ALTER TABLE candidates ADD COLUMN send_started_at INTEGER",
         ):
             try:
                 self.conn.execute(ddl)
@@ -332,12 +334,31 @@ class Store:
     def claim_send(self, order_id: str) -> bool:
         now = int(time.time())
         cur = self.conn.execute(
-            "UPDATE candidates SET send_status='sending', updated_at=? "
+            "UPDATE candidates SET send_status='sending', send_started_at=?, updated_at=? "
             "WHERE order_id=? AND send_status='not_sent'",
-            (now, order_id),
+            (now, now, order_id),
         )
         self.conn.commit()
         return cur.rowcount == 1
+
+    def reconcile_stale_sending(self, max_age_s: int = 300, *, now: int | None = None) -> int:
+        """Fail closed after a crash inside send processing.
+
+        We intentionally never retry a stale ``sending`` candidate. Once a process
+        owned the send, a crash can leave the platform outcome unknowable, so the
+        conservative terminal state is ``unknown`` and it consumes the daily send
+        budget. This is safer than a duplicate paid response.
+        """
+        now = int(time.time()) if now is None else int(now)
+        cutoff = now - max(0, int(max_age_s))
+        cur = self.conn.execute(
+            "UPDATE candidates SET send_status='unknown', sent_at=COALESCE(sent_at, ?), "
+            "last_error='stale sending reconciled after worker crash; no retry', updated_at=? "
+            "WHERE send_status='sending' AND COALESCE(send_started_at, updated_at, 0) < ?",
+            (now, now, cutoff),
+        )
+        self.conn.commit()
+        return int(cur.rowcount)
 
     def set_send_status(self, order_id: str, status: str) -> bool:
         now = int(time.time())
