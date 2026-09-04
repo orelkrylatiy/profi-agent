@@ -45,7 +45,9 @@ def test_stale_sending_becomes_terminal_unknown_without_retry(tmp_path):
         row = store.get_candidate("1")
         assert result == 1
         assert row["send_status"] == "unknown"
-        assert row["sent_at"] == 1000
+        # Analytics must attribute the unknown outcome to the actual send attempt,
+        # not to a later restart/reconciliation (possibly on the next business day).
+        assert row["sent_at"] == 100
         assert "stale sending" in (row["last_error"] or "").lower()
         assert store.claim_send("1") is False
     finally:
