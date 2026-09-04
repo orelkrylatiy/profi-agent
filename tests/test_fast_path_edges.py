@@ -5,14 +5,11 @@ import sqlite3
 import subprocess
 import sys
 from pathlib import Path
-from types import SimpleNamespace
 
 import profi.main as main
-from profi import config
 from profi.fastpath import Decision, normalize_reply_text, process_open_candidate
 from profi.profiles import load_profile
 from profi.storage import Store
-
 
 ROOT = Path(__file__).resolve().parents[1]
 

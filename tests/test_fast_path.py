@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import time
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -80,7 +79,9 @@ class TestReplyText:
         assert len(normalized) <= 500
 
     def test_contacts_are_rejected(self):
-        normalized, why = normalize_reply_text("Напишите мне +7 999 123 45 67, обсудим занятия." * 3)
+        normalized, why = normalize_reply_text(
+            "Напишите мне +7 999 123 45 67, обсудим занятия." * 3
+        )
         assert normalized is None
         assert "контакт" in why.lower()
 
@@ -495,6 +496,7 @@ class TestLegacyAutopilotNoRetry:
         finally:
             store.close()
 
+        monkeypatch.setattr(main.config, "FAST_PATH_ENABLED", False)
         monkeypatch.setattr(main.config, "DB_PATH", db)
         monkeypatch.setattr(main.config, "AUTOPILOT_LOCK", tmp_path / "autopilot.lock")
         monkeypatch.setattr(main.config, "AUTOPILOT_LOG", tmp_path / "autopilot.log")
@@ -503,7 +505,9 @@ class TestLegacyAutopilotNoRetry:
         monkeypatch.setattr(main, "_llm_cooldown_until", lambda: 0)
         monkeypatch.setattr(main, "_worker_running", lambda: False)
         monkeypatch.setattr(main, "_worker_pause", lambda on: None)
-        monkeypatch.setattr(main, "run_respond", lambda *a, **k: (_ for _ in ()).throw(OrderOpenError("boom")))
+        monkeypatch.setattr(
+            main, "run_respond", lambda *a, **k: (_ for _ in ()).throw(OrderOpenError("boom"))
+        )
         monkeypatch.setattr(llm_mod, "status", lambda: {"key_masked": "***"})
         monkeypatch.setattr(llm_mod, "models_chain", lambda: ["fast"])
         monkeypatch.setattr(llm_mod, "chat", lambda *a, **k: "raw")

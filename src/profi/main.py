@@ -1027,6 +1027,10 @@ def run_autopilot() -> int:
 
     from profi import llm as llm_mod
 
+    if config.FAST_PATH_ENABLED:
+        log.debug("autopilot: fast-path enabled — legacy consumer disabled")
+        return 0
+
     now = _dt.now()
     lock = config.AUTOPILOT_LOCK
     try:

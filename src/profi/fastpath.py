@@ -9,8 +9,8 @@ for candidates that reached this flow.
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Callable, Sequence
 
 from profi import config
 from profi import llm as llm_mod
@@ -32,9 +32,7 @@ def _card_tags(details: dict) -> list[str]:
         return [str(tag) for tag in tags]
     raw = ((details.get("raw_bo_order_screen") or {}).get("tags")) or []
     return [
-        str(tag["text"])
-        for tag in raw
-        if isinstance(tag, dict) and tag.get("text") is not None
+        str(tag["text"]) for tag in raw if isinstance(tag, dict) and tag.get("text") is not None
     ]
 
 
@@ -300,9 +298,12 @@ def process_open_candidate(
             rate=None if config.RESPOND_MODE == "commission" else config.RATE,
         )
     except Exception as exc:
-        store.set_send_status(order_id, "failed")
-        store.set_note(order_id, f"fast-path click failed: {str(exc)[:180]}")
-        return "failed"
+        # click_send уже начал необратимую операцию: при потере связи нельзя
+        # утверждать, что отправки не было. unknown terminal предотвращает retry.
+        store.set_send_status(order_id, "unknown")
+        store.record_response(order_id, config.RESPOND_MODE, due)
+        store.set_note(order_id, f"fast-path click outcome unknown: {str(exc)[:180]}")
+        return "unknown"
 
     url_after = str(outcome.get("url_after") or "")
     if "r.php" in url_after and f"id={order_id}" in url_after:
