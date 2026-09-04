@@ -1,19 +1,21 @@
 # Business profiles
 
-`profiles/` хранит бизнес-конфигурацию анкеты отдельно от конкретного аккаунта и браузера.
+`profiles/` хранит бизнес-конфигурацию оффера отдельно от конкретного аккаунта,
+Chrome и SQLite.
 
 Главное правило:
 
 > **profile = оффер/тип преподавателя, а не обязательно один предмет.**
 
-Поэтому сейчас есть:
+Сейчас:
 
 - `info.toml` — информатика / программирование;
-- `languages.toml` — общий языковой профиль для английского + испанского.
+- `languages.toml` — английский + испанский одним языковым оффером.
 
-Если английский и испанский позже начнут отличаться по офферу, ставке, персоне или правилам отбора, их можно будет разделить на два профиля без изменения engine.
+Если английский и испанский позже реально разойдутся по офферу, ставке, persona
+или правилам отбора, их можно разделить без изменения engine.
 
-## Что хранится в profile
+## Формат
 
 ```toml
 id = "languages"
@@ -25,25 +27,47 @@ stop_patterns = ["star-метод"]
 [fallback]
 enabled = true
 templates = [
-  "...",
+  "Здравствуйте! ...",
+  "Добрый день! ...",
 ]
 ```
 
 Поля:
 
-- `persona` — файл `personas/<persona>.md` для LLM;
-- `subject_keywords` — предметные подстроки для hard-filter;
-- `stop_patterns` — стоп-слова именно этого бизнес-профиля;
-- `remote_only` — пропускать только дистанционные заказы;
-- `fallback.templates` — библиотека безопасных шаблонных откликов на будущее.
+- `persona` — `personas/<persona>.md` для LLM;
+- `subject_keywords` — предметные подстроки hard-filter;
+- `stop_patterns` — профильные stop-слова;
+- `remote_only` — только дистанционные заказы;
+- `fallback.enabled/templates` — резервные тексты fresh-order fast-path.
 
-Fallback-тексты **уже хранятся в профиле, но пока автоматически не отправляются**. Автоматический fallback при недоступной LLM будет подключаться вместе с fast-path, чтобы изменение поведения отправки было явным и тестируемым.
+## Когда отправляется fallback
 
-Общие правила, не зависящие от предмета (`VACANCY_PATTERNS`, бартер, special-needs, денежные лимиты, work hours), остаются в `src/profi/config.py`.
+Fallback не заменяет бизнес-триаж. Порядок такой:
+
+```text
+snippet hard filters
+  ↓
+FullOrder gates
+  ↓
+LLM
+  ├─ нормальный verdict=skip  → skipped, fallback НЕ используется
+  ├─ нормальный verdict=send  → LLM text
+  └─ LLM unavailable / limit / bad JSON / invalid send text
+                               → profile fallback
+```
+
+Перед отправкой fallback проходит тот же post-check, что и LLM text:
+
+- никаких телефонов, ссылок, e-mail/контактов;
+- 100–500 символов;
+- если >500, допустимо обрезать только по завершённому предложению;
+- пустой/невалидный fallback приводит к terminal `failed`, а не к отправке мусора.
+
+Выбор шаблона детерминирован по `order_id`: тексты варьируются между заказами,
+но один и тот же заказ всегда получает один и тот же template. В SQLite сохраняется
+`draft_source=llm|fallback`, поэтому эффективность источников можно сравнивать.
 
 ## Как аккаунт выбирает профиль
-
-Рекомендуемый вариант в `accounts/<account>.env`:
 
 ```env
 PROFI_PROFILE=info
@@ -55,21 +79,19 @@ PROFI_PROFILE=info
 PROFI_PROFILE=languages
 ```
 
-Аккаунт при этом продолжает хранить только runtime-настройки: Chrome profile, CDP port, DB, тариф и т.д.
-
-Пример концептуально:
+Account env хранит runtime-настройки:
 
 ```env
 PROFI_PROFILE=languages
 PROFI_CDP_PORT=9222
 PROFI_DB=data/lang.db
-PROFI_CHROME_PROFILE=data/chrome-profiles/avito
+PROFI_CHROME_PROFILE=data/chrome-profiles/lang
 PROFI_RESPOND_MODE=commission
 ```
 
 ## Обратная совместимость
 
-Старые переменные не удалены:
+Старые override'ы остаются:
 
 ```env
 PROFI_PERSONA=lang
@@ -77,23 +99,39 @@ PROFI_SUBJECTS=английск,испанск
 PROFI_STOP_PATTERNS=...
 ```
 
-Они имеют приоритет над значениями profile. Это позволяет мигрировать аккаунты постепенно.
-
 Если `PROFI_PROFILE` не задан:
 
-- legacy `PROFI_PERSONA=info` автоматически выбирает `profile=info`;
-- legacy `PROFI_PERSONA=lang` автоматически выбирает `profile=languages`;
-- для неизвестной legacy persona остаётся старое поведение без profile.
+- `PROFI_PERSONA=info` → `profile=info`;
+- `PROFI_PERSONA=lang` → `profile=languages`;
+- неизвестная legacy persona работает без profile, как раньше.
 
-Если `PROFI_PROFILE` задан явно, но файл отсутствует или невалиден, запуск падает fail-closed вместо молчаливого выбора неправильного оффера.
+Явно указанный, но отсутствующий/битый `PROFI_PROFILE` падает fail-closed: бот не
+должен молча переключиться на другой предмет.
 
-## Где что должно жить
+## Fast-path и rollback
+
+Fallback реально используется только основным fresh-order flow:
+
+```env
+PROFI_FAST_PATH=1
+```
+
+При аварийном rollback:
+
+```env
+PROFI_FAST_PATH=0
+```
+
+worker снова только загружает details, а старый `autopilot` обрабатывает очередь.
+
+## Где что живёт
 
 ```text
-profiles/             бизнес-правила оффера
-personas/             идентичность и LLM-контекст преподавателя
-accounts/*.env        конкретный аккаунт/Chrome/DB/тариф
+profiles/             бизнес-правила оффера + fallback
+personas/             идентичность/контекст преподавателя для LLM
+accounts/*.env        конкретный аккаунт, Chrome, DB, тариф, overrides
 src/profi/            общий engine
 ```
 
-Новый предмет/оффер в нормальном случае не должен требовать изменения `filters.py`, `orders.py`, `respond.py` или browser-кода: добавляется профиль, persona при необходимости и account env.
+Новый оффер в нормальном случае не требует правок browser/orders/respond-кода:
+добавляются profile, при необходимости persona и account env.
