@@ -44,6 +44,10 @@ class _StoreSpy:
     def sends_today(self):
         return 0
 
+    def assign_prompt_variant(self, order_id, experiment_id, variants):
+        self.calls.append(("prompt", experiment_id, "A"))
+        return "A"
+
     def set_draft(self, order_id, status, text=None, source=None, error=None):
         self.calls.append(("draft", status, source))
         return True
@@ -103,6 +107,7 @@ def test_click_exception_is_unknown_and_terminal(monkeypatch):
     assert result == "unknown"
     assert store.status == "unknown"
     assert ("response", "pay", 200) in store.calls
+    assert ("prompt", "outreach_offer_v1", "A") in store.calls
     assert store.claim_send("93400001") is False
 
 
