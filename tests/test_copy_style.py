@@ -41,9 +41,7 @@ class TestClientCopyIssues:
         text = "Здравствуйте! " + (
             "Могу помочь и подробно объяснить, как будут проходить занятия. " * 7
         )
-        assert any(
-            "слишком длинно" in issue for issue in client_copy_issues(text)
-        )
+        assert any("слишком длинно" in issue for issue in client_copy_issues(text))
 
     def test_style_retry_preserves_facts_instruction(self):
         hint = style_retry_instruction(["слишком длинно", "больше одного вопроса"])
