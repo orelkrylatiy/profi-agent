@@ -1,0 +1,70 @@
+name: Fast-path work-hours fix
+
+on:
+  push:
+    branches: [feature/fast-path-fallback-20260904]
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.11"
+
+      - name: Apply work-hours gates
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("src/profi/fastpath.py")
+          text = path.read_text(encoding="utf-8")
+          text = text.replace(
+              "from profi.utils import has_contacts\n",
+              "from profi.utils import has_contacts, in_work_hours\n",
+              1,
+          )
+
+          start_anchor = '''    if config.DAILY_SEND_LIMIT and store.sends_today() >= config.DAILY_SEND_LIMIT:\n        return _terminal(\n'''
+          start_gate = '''    if not in_work_hours():\n        return _terminal(\n            store,\n            order_id,\n            send_status="skipped",\n            draft_status="skipped",\n            note="скип: вне рабочих часов",\n        )\n\n    if config.DAILY_SEND_LIMIT and store.sends_today() >= config.DAILY_SEND_LIMIT:\n        return _terminal(\n'''
+          if "note=\"скип: вне рабочих часов\"" not in text:
+              if text.count(start_anchor) != 1:
+                  raise SystemExit(f"start gate anchor count={text.count(start_anchor)}")
+              text = text.replace(start_anchor, start_gate, 1)
+
+          click_anchor = '''    # Recheck the account-wide daily gate immediately before the irreversible click.\n    if config.DAILY_SEND_LIMIT and store.sends_today() >= config.DAILY_SEND_LIMIT:\n'''
+          click_gate = '''    # Work-hours and account-wide daily gates are rechecked immediately before\n    # the irreversible click: a 22:59 cycle must not send after the window closes.\n    if not in_work_hours():\n        store.set_send_status(order_id, "skipped")\n        store.set_note(order_id, "скип: рабочее окно завершилось перед отправкой")\n        return "skipped"\n\n    if config.DAILY_SEND_LIMIT and store.sends_today() >= config.DAILY_SEND_LIMIT:\n'''
+          if "рабочее окно завершилось перед отправкой" not in text:
+              if text.count(click_anchor) != 1:
+                  raise SystemExit(f"click gate anchor count={text.count(click_anchor)}")
+              text = text.replace(click_anchor, click_gate, 1)
+
+          path.write_text(text, encoding="utf-8")
+          PY
+
+      - name: Install and full gate
+        run: |
+          uv sync
+          uv run ruff check --fix src/profi/fastpath.py tests/test_fast_path_workhours.py
+          uv run ruff format src/profi/fastpath.py tests/test_fast_path_workhours.py
+          uv run ruff check .
+          git ls-files 'scripts/**/*.sh' | xargs -n1 shellcheck
+          uv run pytest -q
+          uv run ruff format --check .
+
+      - name: Commit validated fix
+        run: |
+          if git diff --quiet; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/profi/fastpath.py tests/test_fast_path_workhours.py
+          git commit -m "fix: recheck work hours before fast-path send"
+          git push
