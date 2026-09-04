@@ -134,7 +134,7 @@ Chrome — отдельный persistent profile на аккаунт и свой
 
 ```bash
 uv run python -m profi                  # рабочий worker + fast-path
-uv run python -m profi --once           # один цикл
+uv run python -m profi --once           # один scan-only цикл: details без auto-send
 uv run python -m profi autopilot        # legacy/rollback consumer
 uv run python -m profi llm-check
 uv run python -m profi candidates
