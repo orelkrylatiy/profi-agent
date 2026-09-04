@@ -180,7 +180,10 @@ if RESPOND_MODE not in {"pay", "commission"}:
     )
 
 
-# --- Рабочие часы: локальное время, [lo, hi) ---
+TIMEZONE_NAME = (_get("PROFI_TIMEZONE", "Asia/Yekaterinburg") or "Asia/Yekaterinburg").strip()
+
+
+# --- Рабочие часы: business timezone, [lo, hi) ---
 def _parse_work_hours(v: str | None) -> tuple[int, int]:
     if not v or "," not in v:
         return (8, 23)
