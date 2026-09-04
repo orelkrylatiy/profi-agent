@@ -8,6 +8,7 @@ from profi.copy_style import (
     CHAT_STYLE_OVERRIDE,
     OUTREACH_EXPERIMENT_MARKER,
     OUTREACH_STYLE_OVERRIDE,
+    chat_retry_instruction,
     client_copy_issues,
     style_retry_instruction,
     style_variation,
@@ -79,9 +80,14 @@ def chat(
         return first
 
     log.info("client-copy style retry: channel=%s issues=%s", channel, first_issues)
+    retry_hint = (
+        style_retry_instruction(first_issues)
+        if channel == "outreach"
+        else chat_retry_instruction(first_issues)
+    )
     try:
         second = _chat(
-            styled_system + style_retry_instruction(first_issues),
+            styled_system + retry_hint,
             user,
             temperature,
             max_tokens,
