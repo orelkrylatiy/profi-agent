@@ -58,9 +58,7 @@ def load_profile(name: str, profiles_dir: Path) -> Profile:
 
     persona = str(data.get("persona") or name).strip()
     subject_keywords = _strings(data.get("subject_keywords"), "subject_keywords")
-    stop_patterns = tuple(
-        s.lower() for s in _strings(data.get("stop_patterns"), "stop_patterns")
-    )
+    stop_patterns = tuple(s.lower() for s in _strings(data.get("stop_patterns"), "stop_patterns"))
     remote_only = bool(data.get("remote_only", True))
 
     fallback = data.get("fallback") or {}
