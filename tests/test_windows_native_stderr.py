@@ -19,6 +19,18 @@ def test_worker_runner_switches_to_continue_before_native_python_call():
     assert "*>>" in text[python_pos:]
 
 
+def _decode_powershell_redirect(path: Path) -> str:
+    raw = path.read_bytes()
+    if raw.startswith((b"\xff\xfe", b"\xfe\xff")):
+        return raw.decode("utf-16")
+    try:
+        return raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        # Windows PowerShell 5.1 can write native redirected output as UTF-16LE
+        # even when no BOM survived the first write.
+        return raw.decode("utf-16-le")
+
+
 @pytest.mark.skipif(os.name != "nt", reason="Windows PowerShell runtime semantics")
 def test_powershell_51_native_stderr_redirection_is_non_terminating(tmp_path):
     powershell = shutil.which("powershell")
@@ -47,6 +59,6 @@ def test_powershell_51_native_stderr_redirection_is_non_terminating(tmp_path):
     )
 
     assert proc.returncode == 0, proc.stderr
-    text = log.read_text(encoding="utf-8-sig", errors="replace")
+    text = _decode_powershell_redirect(log)
     assert "STDERR_SENTINEL" in text
     assert "STDOUT_SENTINEL" in text
