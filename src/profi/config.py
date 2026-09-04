@@ -71,12 +71,12 @@ if RHYTHM_TAG and shutil.which("flock") and not os.environ.get("PROFI_WORKER_STA
         f"--rhythm-tag {_tag_q} >> {_log_q} 2>&1 &"
     )
 
-# Файл-сигнал «идёт платная отправка»: автопилот ставит его перед открытием
-# формы отклика и снимает после. Воркер на это время пропускает цикл, а
-# таб-гигиена не закрывает вкладки.
+# Файл-сигнал «идёт платная отправка»: нужен legacy-autopilot при rollback
+# PROFI_FAST_PATH=0. В fast-path свежий заказ обрабатывает сам worker.
 SEND_PAUSE_FILE = DATA_DIR / (f"{LOG_TAG}.send-pause" if LOG_TAG else "send-pause")
 
-# Файл-пауза «LLM у провайдера на лимите».
+# Файл-пауза «LLM у провайдера на лимите». Fresh fast-path продолжает читать
+# ленту и использует profile fallback; legacy-autopilot/чаты LLM не вызывают.
 LLM_COOLDOWN_FILE = DATA_DIR / (f"{LOG_TAG}.llm-cooldown" if LOG_TAG else "llm-cooldown")
 
 # --- Business profile: оффер отдельно от конкретного аккаунта ---
@@ -188,5 +188,8 @@ LOG_LEVEL = _get("PROFI_LOG_LEVEL", "INFO")
 CHAT_CHECK_EVERY_CYCLES = int(_get("PROFI_CHAT_EVERY", "3"))
 
 # --- Кандидаты и детали ---
+# Default-on: свежий заказ проходит details -> decision -> send в той же вкладке.
+# 0 = быстрый rollback к старому details-only worker + отдельному autopilot.
+FAST_PATH_ENABLED = _get("PROFI_FAST_PATH", "1") != "0"
 AUTO_CREATE_CANDIDATES = True
 AUTO_LOAD_DETAILS = True
