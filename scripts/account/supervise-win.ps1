@@ -25,7 +25,7 @@ $mutexName = "Local\ProfiAgentSupervisor_$safeAccount"
 $createdNew = $false
 $script:supervisorMutex = [System.Threading.Mutex]::new($true, $mutexName, [ref]$createdNew)
 if (-not $createdNew) {
-    Write-Log "SUPERVISOR_DUPLICATE account=$Account — another owner already holds $mutexName"
+    Write-Log "SUPERVISOR_DUPLICATE account=$Account - another owner already holds $mutexName"
     $script:supervisorMutex.Dispose()
     exit 0
 }
