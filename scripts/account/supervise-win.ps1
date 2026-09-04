@@ -1,4 +1,4 @@
-param([Parameter(Mandatory = $true)][string]$Account)
+﻿param([Parameter(Mandatory = $true)][string]$Account)
 
 $ErrorActionPreference = "Stop"
 $repo = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
@@ -253,12 +253,26 @@ function Test-WorkerRunning {
 }
 
 $script:lastWorkerStart = [datetime]::MinValue
+$script:workerFlaps = 0
 function Ensure-Worker {
     param([bool]$BrowserReady)
 
     if (-not $BrowserReady) { return }
-    if (Test-WorkerRunning) { return }
+    if (Test-WorkerRunning) { $script:workerFlaps = 0; return }
     if (((Get-Date) - $script:lastWorkerStart).TotalSeconds -lt 30) { return }
+
+    # Анти-флап (инцидент 04.09: воркер умирал молча каждые ~31 с, супервизор
+    # 44 раза подряд перезапускал его и плодил вкладки about:blank). Если
+    # воркер, запущенный >40 с назад, уже исчез — это флап; 5 подряд —
+    # пауза 5 мин, чтобы не устраивать рестарт-шторм.
+    if ($script:lastWorkerStart -ne [datetime]::MinValue) {
+        $script:workerFlaps++
+        if ($script:workerFlaps -ge 5) {
+            Write-Log "WORKER_FLAP_BACKOFF account=$Account consecutive=$($script:workerFlaps) - пауза 5 мин"
+            Start-Sleep -Seconds 300
+            $script:workerFlaps = 0
+        }
+    }
 
     $runner = Join-Path $repo "scripts\account\run-worker-win.ps1"
     Write-Log "WORKER_START account=$Account"

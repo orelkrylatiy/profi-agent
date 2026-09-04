@@ -1,4 +1,4 @@
-param([Parameter(Mandatory = $true)][string]$Account)
+﻿param([Parameter(Mandatory = $true)][string]$Account)
 
 $ErrorActionPreference = "Stop"
 $repo = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
@@ -38,5 +38,12 @@ if (-not (Test-Path $python)) {
 }
 
 New-Item -ItemType Directory -Force -Path (Join-Path $repo "logs") | Out-Null
+
+# python пишет логи в stderr; PS 5.1 при *>> заворачивает каждую строку stderr
+# нативного процесса в ErrorRecord (NativeCommandError) — с EAP="Stop" первая же
+# строка лога убивала wrapper, пайп stderr рвался и python молча умирал
+# (инцидент 04.09: рестарт-луп каждые ~31 с + 43 вкладки about:blank).
+# EAP="Continue" — stderr-строки спокойно летят в файл.
+$ErrorActionPreference = "Continue"
 & $python -m profi.main --rhythm-tag $Account *>> (Join-Path $repo "logs\console-$Account.log")
 exit $LASTEXITCODE

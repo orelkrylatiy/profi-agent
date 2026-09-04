@@ -1,4 +1,4 @@
-param([Parameter(Mandatory = $true)][string]$Account)
+﻿param([Parameter(Mandatory = $true)][string]$Account)
 
 $ErrorActionPreference = "Stop"
 $repo = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
@@ -38,6 +38,9 @@ if (-not (Test-Path $python)) {
 }
 
 New-Item -ItemType Directory -Force -Path (Join-Path $repo "logs") | Out-Null
+# EAP="Continue": см. комментарий в run-worker-win.ps1 — stderr-строки python
+# при *>> становятся ErrorRecord, и с EAP="Stop" wrapper умирал молча.
+$ErrorActionPreference = "Continue"
 while ($true) {
     & $python -m profi.main autopilot --rhythm-tag $Account *>> (Join-Path $repo "logs\autopilot-$Account.log")
     Start-Sleep -Seconds 120
