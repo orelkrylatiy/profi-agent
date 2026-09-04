@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
+import threading
+import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -140,3 +144,121 @@ def test_powershell_scripts_parse_in_all_available_shells():
                 check=True,
                 cwd=ROOT,
             )
+
+
+def test_windows_runtime_port_conflict_singleton_and_targeted_stop():
+    if os.name != "nt":
+        return
+    powershell = shutil.which("powershell")
+    if powershell is None:
+        return
+
+    class OkHandler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b"{}")
+
+        def log_message(self, _format, *args):
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), OkHandler)
+    port = server.server_address[1]
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+
+    account = "ci-supervisor-runtime"
+    env_path = ROOT / "accounts" / f"{account}.env"
+    log_path = ROOT / "logs" / f"supervisor-{account}.log"
+    env_path.write_text(
+        f"PROFI_CDP_PORT={port}\n"
+        f"PROFI_CHROME_PROFILE=data/browser-profiles/{account}\n"
+        "PROFI_BROWSER_WATCH_INTERVAL=3\n",
+        encoding="utf-8",
+    )
+    log_path.unlink(missing_ok=True)
+
+    first = None
+    try:
+        first = subprocess.Popen(
+            [
+                powershell,
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                str(SUPERVISOR),
+                "-Account",
+                account,
+            ],
+            cwd=ROOT,
+        )
+
+        deadline = time.monotonic() + 10
+        log = ""
+        while time.monotonic() < deadline:
+            if log_path.exists():
+                log = log_path.read_text(encoding="utf-8-sig")
+                if "CDP_PORT_CONFLICT" in log:
+                    break
+            time.sleep(0.2)
+        assert first.poll() is None
+        assert "CDP_PORT_CONFLICT" in log
+        assert "WORKER_START" not in log
+
+        second = subprocess.run(
+            [
+                powershell,
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                str(SUPERVISOR),
+                "-Account",
+                account,
+            ],
+            cwd=ROOT,
+            timeout=10,
+            check=False,
+        )
+        assert second.returncode == 0
+
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            log = log_path.read_text(encoding="utf-8-sig")
+            if "SUPERVISOR_DUPLICATE" in log:
+                break
+            time.sleep(0.1)
+        assert "SUPERVISOR_DUPLICATE" in log
+
+        subprocess.run(
+            [
+                powershell,
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                str(STOP),
+                "-Account",
+                account,
+            ],
+            cwd=ROOT,
+            timeout=15,
+            check=True,
+        )
+        first.wait(timeout=10)
+    finally:
+        if first is not None and first.poll() is None:
+            first.terminate()
+            try:
+                first.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                first.kill()
+        server.shutdown()
+        server.server_close()
+        env_path.unlink(missing_ok=True)
+        log_path.unlink(missing_ok=True)
