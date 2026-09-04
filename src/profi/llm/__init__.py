@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 
 from profi.copy_style import (
@@ -45,6 +46,26 @@ def _copy_text(raw: str, channel: str) -> str | None:
     return str(value).strip() if value else None
 
 
+def _chat_handoff_requested(raw: str) -> bool:
+    try:
+        payload = json_reply(raw)
+    except Exception:
+        return False
+    return bool(isinstance(payload, dict) and payload.get("needs_human"))
+
+
+def _disable_chat_handoff(raw: str) -> str:
+    """Keep the legacy JSON field for compatibility but never hand a chat off."""
+    try:
+        payload = json_reply(raw)
+    except Exception:
+        return raw
+    if not isinstance(payload, dict):
+        return raw
+    payload["needs_human"] = False
+    return json.dumps(payload, ensure_ascii=False)
+
+
 def chat(
     system: str,
     user: str,
@@ -56,6 +77,8 @@ def chat(
 
     Outreach A/B/C composition is assigned before this layer and must remain
     unchanged across retries. Chat keeps a little non-experimental variation.
+    Chat handoff is temporarily disabled: the legacy ``needs_human`` field is
+    forced to false so old runtime code cannot silently consume a client turn.
     The retry is best-effort: a style failure can never lose a usable lead.
     """
     channel = _copy_channel(system)
@@ -73,11 +96,14 @@ def chat(
 
     first = _chat(styled_system, user, temperature, max_tokens, model)
     first_text = _copy_text(first, channel)
-    if not first_text:
+    first_issues = client_copy_issues(first_text, channel=channel) if first_text else []
+    if channel == "chat" and _chat_handoff_requested(first):
+        first_issues.append("needs_human отключён — нужен обычный ответ")
+
+    if not first_text and not first_issues:
         return first
-    first_issues = client_copy_issues(first_text, channel=channel)
     if not first_issues:
-        return first
+        return _disable_chat_handoff(first) if channel == "chat" else first
 
     log.info("client-copy style retry: channel=%s issues=%s", channel, first_issues)
     retry_hint = (
@@ -94,18 +120,20 @@ def chat(
             model,
         )
     except Exception:
-        return first
+        return _disable_chat_handoff(first) if channel == "chat" else first
 
     second_text = _copy_text(second, channel)
+    second_issues = client_copy_issues(second_text, channel=channel) if second_text else []
+    if channel == "chat" and _chat_handoff_requested(second):
+        second_issues.append("needs_human отключён — нужен обычный ответ")
+
     if not second_text:
-        return first
-    second_issues = client_copy_issues(second_text, channel=channel)
+        return _disable_chat_handoff(first) if channel == "chat" else first
 
     # Never replace a valid first response with a retry that is equally or more
     # template-like. This is a style improvement layer, not a business gate.
-    if len(second_issues) < len(first_issues):
-        return second
-    return first
+    chosen = second if len(second_issues) < len(first_issues) else first
+    return _disable_chat_handoff(chosen) if channel == "chat" else chosen
 
 
 __all__ = ["chat", "is_limit_error", "json_reply", "models_chain", "set_model", "status"]
