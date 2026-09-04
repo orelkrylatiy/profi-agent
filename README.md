@@ -1,8 +1,8 @@
 # Контур A — воркер откликов Профи.ру (+ Контур B light: автоответы в чатах)
 
 **АВТОРЕЖИМ (с 2026-08-31):** лента → фильтры → LLM-триаж и кастомный текст
-→ автоматическая отправка откликов с гейтами (лимит 3/день, потолок 500 ₽,
-позиция ≤ 20, рабочие часы 8–23). Ручная отправка тоже доступна (`respond`).
+→ автоматическая отправка откликов с гейтами (потолок цены отклика, позиция ≤ 20,
+рабочие часы 8–23). Ручная отправка тоже доступна (`respond`).
 **Чаты (с 2026-09-02):** воркер сам отвечает клиентам через LLM — каждый
 N-й цикл (`PROFI_CHAT_EVERY`, дефолт 3 ≈ раз в 4.5–6 мин). Гейты:
 `autopilot.lock` (не пересекается с платной отправкой), ≤2 ответов за
@@ -19,9 +19,44 @@ N-й цикл (`PROFI_CHAT_EVERY`, дефолт 3 ≈ раз в 4.5–6 мин).
   — жёсткие гейты → LLM (GLM-5.3) триаж+текст → отправка → `logs/autopilot.log`;
 - диспетчер launchd `com.profi.chats` (каждые 240 с) → `chats_unread.py`
   (дешёвый пробник, 0 токенов) → `chat-auto` — **запасной** путь чатов,
-  когда воркер не запущен; сам поднимает Chrome, если CDP мёртв;
+  когда воркер не запущен;
 - LLM-слой `src/profi/llm/` — мульти-провайдерный (glm / openai / anthropic-протокол),
-  настройка в `.env`.
+  настройка в `.env`;
+- `profiles/` — бизнес-профили офферов: предметы, профильные stop-слова,
+  persona и библиотека fallback-текстов отдельно от Chrome/DB конкретного аккаунта.
+
+## Business profiles
+
+Один profile = один оффер/тип преподавателя, а не обязательно один предмет.
+Сейчас:
+
+```text
+profiles/info.toml        информатика / программирование
+profiles/languages.toml   английский + испанский одним языковым профилем
+```
+
+Рекомендуется выбирать профиль в `accounts/<account>.env`:
+
+```env
+PROFI_PROFILE=info
+```
+
+или:
+
+```env
+PROFI_PROFILE=languages
+```
+
+`PROFI_PERSONA`, `PROFI_SUBJECTS` и `PROFI_STOP_PATTERNS` сохранены как
+обратносуместимые override'ы: существующие account env можно мигрировать постепенно.
+Legacy `PROFI_PERSONA=info` автоматически соответствует `profile=info`, а
+`PROFI_PERSONA=lang` — `profile=languages`.
+
+Fallback-шаблоны уже лежат внутри профилей, но **пока не отправляются автоматически**
+при недоступной LLM. Их подключение планируется вместе с fast-path, чтобы изменение
+поведения отправки было отдельным, контролируемым шагом.
+
+Подробно: `profiles/README.md`.
 
 ## Настройка
 
@@ -34,7 +69,7 @@ uv tool install pre-commit && pre-commit install   # хуки: ruff + shellcheck
 ```
 
 Chrome — системный, отдельный профиль `data/chrome-profiles/main`,
-CDD-порт **9333**, запуск `scripts/browser/start-chrome.sh` (идемпотентен).
+CDP-порт **9333**, запуск `scripts/browser/start-chrome.sh` (идемпотентен).
 
 ## Команды
 
@@ -56,9 +91,13 @@ uv run pytest                           # тесты чистой логики
 
 ## Где что лежит
 
-- `src/profi/` — пакет: `main` (CLI/оркестрация), `browser` (Chrome/CDP),
+- `src/profi/` — общий engine: `main` (CLI/оркестрация), `browser` (Chrome/CDP),
   `integration` (лента/карточки/отклики/чаты), `llm`, `storage` (SQLite),
-  `models`, `utils`, `config`;
+  `models`, `utils`, `config`, `profiles` (TOML loader);
+- `profiles/` — бизнес-конфигурация оффера: предметы, stop-слова, persona,
+  fallback templates;
+- `personas/` — LLM-идентичность преподавателя;
+- `accounts/*.env` — конкретный экземпляр аккаунта: профиль, Chrome/CDP, DB, тариф;
 - `data/profi.db` — SQLite: `feed_seen`, `candidates`, `chat_log`,
   вьюшка `v_responses`; `data/browser-profiles/` — профили Chrome (сессии);
 - `logs/worker.log` — воркер; `logs/autopilot.log` — решения автопилота;
@@ -68,6 +107,6 @@ uv run pytest                           # тесты чистой логики
 - `scripts/` — `rhythm_keeper.sh`/`autopilot_cron.sh` (точки входа кронов),
   `account/` (воркеры), `browser/` (Chrome), `diag/` (пробники).
 
-Настройки: `src/profi/config.py` (гейты, ритм, лимиты, RATE) + `.env`
-(шаблон `.env.example`: LLM-ключи и все `PROFI_*` — аккаунт, порт, предметы,
-`PROFI_CHAT_EVERY`; окружение процесса старше `.env`).
+Приоритет настройки бизнес-части: account env override → `.env` override →
+`profiles/<name>.toml` → дефолт engine. Runtime-настройки браузера и БД остаются
+в account env / `src/profi/config.py`.
