@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS candidates (
 
     draft_status           TEXT NOT NULL,
     draft_text             TEXT,
+    draft_source           TEXT,
     draft_generated_at     INTEGER,
 
     send_status            TEXT NOT NULL,
@@ -66,6 +67,7 @@ SELECT
     json_extract(details_json, '$.competition_position')       AS position,
     length(draft_text)                                          AS text_len,
     draft_text,
+    draft_source,
     respond_mode,
     paid_rub,
     -- что реально заплатили: запись отправки > цена платного тарифа из карточки
@@ -79,8 +81,8 @@ FROM candidates;
 
 # feed_seen: NEW / UPDATED / UNCHANGED
 # candidates.details_status: pending / ready / error
-# candidates.draft_status:   pending / generating / generated / error
-# candidates.send_status:    not_sent / sent / unknown; v1-расширение: skipped
+# candidates.draft_status:   pending / generating / generated / skipped / error
+# candidates.send_status:    not_sent / sending / sent / unknown / skipped / failed
 
 
 class Store:
@@ -100,11 +102,16 @@ class Store:
         for ddl in (
             "ALTER TABLE candidates ADD COLUMN respond_mode TEXT",
             "ALTER TABLE candidates ADD COLUMN paid_rub INTEGER",
+            "ALTER TABLE candidates ADD COLUMN draft_source TEXT",
         ):
             try:
                 self.conn.execute(ddl)
             except sqlite3.OperationalError:  # колонка уже есть
                 pass
+        # VIEW создавался до ALTER для старой БД и мог упасть на draft_source.
+        # После миграций гарантированно пересобираем его уже на актуальной схеме.
+        self.conn.execute("DROP VIEW IF EXISTS v_responses")
+        self.conn.executescript(SCHEMA)
         self.conn.commit()
 
     def close(self):
@@ -171,9 +178,72 @@ class Store:
         )
         self.conn.commit()
 
+    def update_details_for_fast_path(self, order_id: str, details_json: str) -> None:
+        """Persist full details and atomically claim the draft stage for worker fast-path.
+
+        Legacy autopilot only selects draft_status='pending', therefore there is no
+        ready/pending race window where it can reopen the same fresh order.
+        """
+        now = int(time.time())
+        self.conn.execute(
+            "UPDATE candidates SET details_status='ready', details_json=?, details_loaded_at=?, "
+            "draft_status='generating', updated_at=? WHERE order_id=? AND send_status='not_sent'",
+            (details_json, now, now, order_id),
+        )
+        self.conn.commit()
+
+    def set_draft(
+        self,
+        order_id: str,
+        status: str,
+        *,
+        text: str | None = None,
+        source: str | None = None,
+        error: str | None = None,
+    ) -> bool:
+        """Persist draft lifecycle and origin (llm/fallback) without losing prior text."""
+        now = int(time.time())
+        cur = self.conn.execute(
+            "UPDATE candidates SET draft_status=?, "
+            "draft_text=CASE WHEN ? IS NOT NULL THEN ? ELSE draft_text END, "
+            "draft_source=CASE WHEN ? IS NOT NULL THEN ? ELSE draft_source END, "
+            "draft_generated_at=CASE WHEN ?='generated' THEN ? ELSE draft_generated_at END, "
+            "last_error=CASE WHEN ? IS NOT NULL THEN ? ELSE last_error END, "
+            "updated_at=? WHERE order_id=?",
+            (
+                status,
+                text,
+                text,
+                source,
+                source,
+                status,
+                now,
+                error,
+                error[:300] if error else None,
+                now,
+                order_id,
+            ),
+        )
+        self.conn.commit()
+        return cur.rowcount > 0
+
+    def claim_send(self, order_id: str) -> bool:
+        """Atomically transition not_sent -> sending; only one process can win."""
+        now = int(time.time())
+        cur = self.conn.execute(
+            "UPDATE candidates SET send_status='sending', updated_at=? "
+            "WHERE order_id=? AND send_status='not_sent'",
+            (now, order_id),
+        )
+        self.conn.commit()
+        return cur.rowcount == 1
+
     def set_send_status(self, order_id: str, status: str) -> bool:
-        """Гейт отправки: sent / skipped / unknown. sent и unknown — потраченные
-        отправки (unknown тоже списывает дневной лимит — P0-C)."""
+        """Set send lifecycle state.
+
+        sent/unknown are irreversible paid-attempt states and consume the daily
+        limit. skipped/failed are terminal without retry; sending is an atomic claim.
+        """
         now = int(time.time())
         cur = self.conn.execute(
             "UPDATE candidates SET send_status = ?, "
@@ -219,7 +289,7 @@ class Store:
         return cur.rowcount > 0
 
     def sends_today(self) -> int:
-        """Сколько платных откликов отправлено с начала суток (для DAILY_SEND_LIMIT)."""
+        """Сколько откликов отправлено/неопределённо с начала суток."""
         import datetime as _dt
 
         midnight = int(
