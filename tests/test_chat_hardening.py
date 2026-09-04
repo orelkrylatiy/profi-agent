@@ -188,5 +188,5 @@ def test_openai_compatible_path_uses_requested_model(monkeypatch):
 def test_legacy_chat_cron_restarts_chrome_only_for_dead_cdp():
     root = Path(__file__).resolve().parents[1]
     script = (root / "scripts" / "chat_cron.sh").read_text(encoding="utf-8")
-    assert '\"error\": \"cdp_dead\"' in script
+    assert '"error": "cdp_dead"' in script
     assert "grep -q '\"ok\": false'" not in script
