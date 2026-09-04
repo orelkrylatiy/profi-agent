@@ -250,6 +250,18 @@ def run_loop(max_cycles: int | None = None) -> int:
                 log.info("нерабочие часы — мониторинг спит (проверка раз в 10 мин)")
                 time.sleep(10 * 60)
                 continue
+            from profi.fastpath import commission_paused
+
+            if config.RESPOND_MODE == "commission" and commission_paused():
+                # Дневной лимит profi на «Комиссию» исчерпан (замок в модалке
+                # тарифа, инцидент lang 04.09): по решению владельца аккаунт
+                # целиком встаёт до завтра — LLM не тратим, ленту не дёргаем.
+                log.info(
+                    "комиссия на сегодня исчерпана — аккаунт приостановлен "
+                    "(проверка раз в 10 мин)"
+                )
+                time.sleep(10 * 60)
+                continue
             # LLM cooldown больше не останавливает acquisition: fresh-order
             # fast-path использует profile fallback. Чаты и legacy-autopilot
             # по-прежнему уважают cooldown и не тратят LLM-квоту.

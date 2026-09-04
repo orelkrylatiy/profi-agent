@@ -26,6 +26,13 @@ TARIFFS_BLOCK_TESTID = "orderCard/tariffs"
 BID_WINDOW_TESTID = "bid_window_container"
 PAY_BUTTON_TESTID = "payment_methods_form_pay_button"
 COMMISSION_RE = re.compile("комисси", re.IGNORECASE)
+# Тариф «Комиссия» исчерпан: в модалке у опции замок (data-testid
+# orderCard/tariffs/lockIcon) и текст «не больше 20 раз в день. Подождите до
+# завтра» (инцидент 04.09: lang упёрся в лимит в 13:59 и молотил скипами
+# «к оплате N ₽» до полуночи).
+COMMISSION_LIMIT_RE = re.compile(
+    r"не больше\s*\d+\s*раз в день|подождите до завтра", re.IGNORECASE
+)
 # страница после клика показывает это при отказе RPC (инцидент #92799459, rpc 400)
 SEND_ERROR_MARKER = "произошла ошибка"
 
@@ -46,6 +53,16 @@ class OrderHiddenError(RespondError):
     Это не сбой воркера: дешёвые заказы площадка/клиент прячут за минуты,
     между загрузкой деталей и попыткой отправки. Автопилот такие кандидаты
     корректно скипает (main.py: код возврата 3), а не ретраит.
+    """
+
+
+class CommissionExhaustedError(RespondError):
+    """Дневной лимит тарифа «Комиссия» (profi.ru: ~20 откликов/день).
+
+    Опция заблокирована (замок + «Подождите до завтра»), клик по ней ничего
+    не меняет — выбранным остаётся платный «Отклик N ₽». По этому сигналу
+    воркер приостанавливает аккаунт до завтра (решение владельца 04.09),
+    а не жжёт LLM на каждом кандидате.
     """
 
 
@@ -100,10 +117,46 @@ def _pass_suit_gate(order_page: Page) -> bool:
 WRITE_CLIENT_CTA = "Написать клиенту"
 
 
-def _open_via_write_client(order_page: Page) -> None:
+def _select_commission_in_modal(cont) -> None:
+    """Выбрать «Комиссию» в модалке «Выберите тариф» (до «Продолжить»).
+
+    Дефолт в модалке — ПЛАТНЫЙ «Отклик N ₽» (04.09 profi сменил дефолт,
+    раньше был «Комиссия»). Замок/лимит-текст → CommissionExhaustedError.
+    Опцию ищем ТОЛЬКО внутри модалки (предок «Продолжить»): в тексте заказа
+    «комиссия» встречается в других смыслах, кликать по нему нельзя.
+    """
+    modal = None
+    try:
+        handle = cont.evaluate_handle(
+            "e => { let el = e; for (let i = 0; i < 8 && el.parentElement; i++) {"
+            " el = el.parentElement;"
+            " if (el.textContent && /комисси/i.test(el.textContent)) return el; }"
+            " return null; }"
+        )
+        modal = handle.as_element() if handle else None
+    except Exception:
+        modal = None
+    if modal is None:
+        raise CommissionExhaustedError(
+            "в модалке тарифа нет опции «Комиссия» — доступен только платный отклик"
+        )
+    lock = modal.query_selector('[data-testid*="tariffs/lockIcon"]')
+    if lock or COMMISSION_LIMIT_RE.search(modal.inner_text(timeout=3_000) or ""):
+        raise CommissionExhaustedError(
+            "тариф «Комиссия» заблокирован: дневной лимит profi исчерпан"
+            " («Подождите до завтра»)"
+        )
+    cands = modal.query_selector_all("xpath=.//*[normalize-space(.)='Комиссия']")
+    if not cands:
+        raise CommissionExhaustedError("опция «Комиссия» в модалке не найдена")
+    human_pause(0.5, 1.2)
+    cands[0].click(delay=random.randint(70, 150))
+    human_pause(0.4, 1.0)
+
+
+def _open_via_write_client(order_page: Page, mode: str) -> None:
     """Новый флоу (09.2026): вместо блока тарифов на карточке — CTA
     «Написать клиенту» → модалка «Выберите тариф» → «Продолжить».
-    В модалке дефолт уже «Комиссия», отдельный выбор не нужен.
     """
     cta = order_page.get_by_test_id("order_card_container").get_by_text(
         WRITE_CLIENT_CTA, exact=False
@@ -126,6 +179,9 @@ def _open_via_write_client(order_page: Page) -> None:
         cont.first.wait_for(timeout=10_000)
     except Exception as exc:
         raise RespondError(f"модалка «Выберите тариф» не появилась: {exc}") from exc
+    if mode == "commission":
+        # Дефолт в модалке — платный тариф; «Комиссию» выбираем явно (04.09).
+        _select_commission_in_modal(cont.first)
     human_pause(0.8, 1.6)
     cont.first.click(delay=random.randint(70, 150))
 
@@ -143,6 +199,11 @@ def select_tariff(order_page: Page, mode: str) -> None:
     if block.count() == 0:
         raise RespondError("блок тарифов не найден — не могу выбрать «Комиссию»")
     txt = block.first.inner_text(timeout=5_000)
+    if COMMISSION_LIMIT_RE.search(txt):
+        raise CommissionExhaustedError(
+            "тариф «Комиссия» заблокирован: дневной лимит profi исчерпан"
+            " («Подождите до завтра»)"
+        )
     if not COMMISSION_RE.search(txt):
         raise RespondError(
             "тариф «Комиссия» недоступен на аккаунте (в блоке только платный отклик). "
@@ -181,7 +242,7 @@ def _open_respond_form_inner(order_page: Page, mode: str) -> Page:
         _pass_suit_gate(order_page)
     if order_page.get_by_test_id(TARIFFS_BLOCK_TESTID).count() == 0:
         # проф.ру убрал блок тарифов: новый флоу через «Написать клиенту»
-        _open_via_write_client(order_page)
+        _open_via_write_client(order_page, mode)
         order_page.get_by_test_id(BID_WINDOW_TESTID).wait_for(timeout=15_000)
         human_pause(0.5, 1.2)
         return order_page
@@ -222,6 +283,12 @@ def fill_form(order_page: Page, rate: int, text: str, mode: str = "pay") -> dict
     """
     win = order_page.get_by_test_id(BID_WINDOW_TESTID).first
     textarea = win.locator("textarea").first
+    # 04.09: окно открывается, а textarea отрисовывается с задержкой —
+    # мгновенная проверка count() давала ложное «не найдена» (info/lang).
+    try:
+        textarea.wait_for(state="attached", timeout=5_000)
+    except Exception:
+        pass
     if textarea.count() == 0:
         raise RespondError("textarea сообщения не найдена в форме")
 

@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from datetime import date
 
 from profi import config
 from profi import llm as llm_mod
@@ -28,6 +29,27 @@ class Decision:
     reason: str
     text: str | None = None
     source: str | None = None  # llm | fallback | rules
+
+
+def commission_paused() -> bool:
+    """True, если сегодня уже зафиксировано исчерпание комиссии (лимит profi)."""
+    try:
+        return (
+            config.COMMISSION_EXHAUSTED_FILE.read_text(encoding="utf-8").strip()
+            == date.today().isoformat()
+        )
+    except OSError:
+        return False
+
+
+def mark_commission_exhausted() -> None:
+    """Зафиксировать дату исчерпания — аккаунт стоит до конца дня (Макс, 04.09)."""
+    try:
+        config.COMMISSION_EXHAUSTED_FILE.write_text(
+            date.today().isoformat(), encoding="utf-8"
+        )
+    except OSError:
+        pass
 
 
 def _card_tags(details: dict) -> list[str]:
@@ -245,6 +267,16 @@ def process_open_candidate(
             note="скип: дневной лимит отправок исчерпан",
         )
 
+    if config.RESPOND_MODE == "commission" and commission_paused():
+        # Страховка на случай вызова мимо общего гейта в run_loop: LLM не тратим.
+        return _terminal(
+            store,
+            order_id,
+            send_status="skipped",
+            draft_status="skipped",
+            note="скип: комиссия на сегодня исчерпана, аккаунт приостановлен до завтра",
+        )
+
     variant = store.assign_prompt_variant(
         order_id,
         OUTREACH_EXPERIMENT_ID,
@@ -296,6 +328,11 @@ def process_open_candidate(
     except respond_mod.OrderHiddenError as exc:
         store.set_send_status(order_id, "skipped")
         store.set_note(order_id, f"скип: заказ скрыт — {str(exc)[:160]}")
+        return "skipped"
+    except respond_mod.CommissionExhaustedError as exc:
+        mark_commission_exhausted()
+        store.set_send_status(order_id, "skipped")
+        store.set_note(order_id, f"скип: {str(exc)[:160]} — аккаунт до завтра стоит")
         return "skipped"
     except Exception as exc:
         store.set_send_status(order_id, "failed")

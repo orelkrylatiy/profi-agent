@@ -79,6 +79,13 @@ SEND_PAUSE_FILE = DATA_DIR / (f"{LOG_TAG}.send-pause" if LOG_TAG else "send-paus
 # ленту и использует profile fallback; legacy-autopilot/чаты LLM не вызывают.
 LLM_COOLDOWN_FILE = DATA_DIR / (f"{LOG_TAG}.llm-cooldown" if LOG_TAG else "llm-cooldown")
 
+# Дневной лимит profi на тариф «Комиссия» (~20 откликов/день; инцидент lang
+# 04.09 — исчерпан к 13:59). Хранит дату исчерпания: до конца этого дня аккаунт
+# приостанавливается целиком (решение Макса), на следующий день файл не активен.
+COMMISSION_EXHAUSTED_FILE = DATA_DIR / (
+    f"{LOG_TAG}.commission-exhausted" if LOG_TAG else "commission-exhausted"
+)
+
 # --- Business profile: оффер отдельно от конкретного аккаунта ---
 PROFILE_DIR = PROJECT_DIR / "profiles"
 _legacy_persona = _get("PROFI_PERSONA", "info")

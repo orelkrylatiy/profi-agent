@@ -2,18 +2,18 @@
   "accounts": {
     "info": {
       "candidates": {
-        "created": 15,
+        "created": 16,
         "current_details_errors": 6,
         "current_draft_errors": 11,
         "current_send_status": {
           "failed": 3,
           "not_sent": 19,
           "sending": 1,
-          "sent": 10,
+          "sent": 11,
           "skipped": 128
         },
-        "details_ready": 15,
-        "drafts_generated": 10
+        "details_ready": 16,
+        "drafts_generated": 11
       },
       "chat": {
         "injection_guard": 0,
@@ -23,8 +23,8 @@
       },
       "db_read_error": false,
       "feed": {
-        "new_orders": 96,
-        "orders_seen": 107
+        "new_orders": 97,
+        "orders_seen": 108
       },
       "log_events": {
         "cdp_reconnect": 2,
@@ -34,10 +34,10 @@
       "responses": {
         "missing_payment_records": 0,
         "modes": {
-          "commission": 3
+          "commission": 4
         },
         "recorded_paid_rub": 0,
-        "sent": 3,
+        "sent": 4,
         "unknown": 0
       }
     },
@@ -49,9 +49,9 @@
         "current_send_status": {
           "failed": 14,
           "not_sent": 99,
-          "sending": 2,
+          "sending": 1,
           "sent": 25,
-          "skipped": 510,
+          "skipped": 511,
           "unknown": 2
         },
         "details_ready": 250,
@@ -121,9 +121,9 @@
       }
     }
   },
-  "code_revision": "4fc10839e62a",
+  "code_revision": "a0e8d499e421",
   "date": "2026-09-04",
-  "generated_at": "2026-09-04T21:17:29+05:00",
+  "generated_at": "2026-09-04T21:18:49+05:00",
   "logs": {
     "events": {
       "auth_required": 1,
@@ -139,7 +139,7 @@
       "error": 37,
       "warning": 351
     },
-    "lines_for_day": 6449
+    "lines_for_day": 6462
   },
   "privacy": {
     "aggregate_only": true,
@@ -153,12 +153,12 @@
   "schema_version": 1,
   "timezone": "Asia/Yekaterinburg",
   "totals": {
-    "candidates_created": 272,
+    "candidates_created": 273,
     "chat_replies": 13,
     "needs_human": 5,
-    "new_orders": 412,
+    "new_orders": 413,
     "recorded_paid_rub": 0,
-    "responses_sent": 23,
+    "responses_sent": 24,
     "responses_unknown": 2,
     "technical_error_events": 326
   }
