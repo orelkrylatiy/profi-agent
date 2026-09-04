@@ -17,15 +17,11 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           python-version: "3.11"
-      - name: Fix and validate
+      - name: Normalize tests
         run: |
           uv sync
           uv run ruff check --fix tests/test_windows_supervisor.py
           uv run ruff format tests/test_windows_supervisor.py
-          uv run ruff check .
-          uv run pytest -q tests/test_windows_supervisor.py
-          uv run pytest -q
-          uv run ruff format --check .
       - name: Commit formatting only
         run: |
           if git diff --quiet; then
@@ -36,3 +32,9 @@ jobs:
           git add tests/test_windows_supervisor.py
           git commit -m "style: normalize Windows supervisor tests"
           git push
+      - name: Full validate
+        run: |
+          uv run ruff check .
+          uv run pytest -q tests/test_windows_supervisor.py
+          uv run pytest -q
+          uv run ruff format --check .
