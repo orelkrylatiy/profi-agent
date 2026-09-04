@@ -25,6 +25,12 @@ def test_start_win_is_idempotent_and_starts_single_account_supervisor():
     assert "while ($true)" not in text
 
 
+def test_supervisor_has_process_lifetime_singleton_guard():
+    text = _text(SUPERVISOR)
+    assert "System.Threading.Mutex" in text
+    assert "SUPERVISOR_DUPLICATE" in text
+
+
 def test_supervisor_owns_browser_lifecycle_but_worker_keeps_no_launch():
     text = _text(SUPERVISOR)
     assert "/json/version" in text
@@ -32,6 +38,20 @@ def test_supervisor_owns_browser_lifecycle_but_worker_keeps_no_launch():
     assert "--user-data-dir=" in text
     assert "PROFI_CHROME_NO_LAUNCH" in text
     assert '"1"' in text or "='1'" in text or '= "1"' in text
+
+
+def test_cdp_health_is_bound_to_expected_profile_and_port():
+    text = _text(SUPERVISOR)
+    ensure = text[text.index("function Ensure-Browser") : text.index("function Test-AccountToken")]
+    assert "$cdpUp = Test-Cdp" in ensure
+    assert "$profileProcesses = @(Get-ProfileChromeProcesses)" in ensure
+    assert "CDP_PORT_CONFLICT" in ensure
+    assert ensure.index("$profileProcesses = @(Get-ProfileChromeProcesses)") < ensure.index(
+        "if ($cdpUp)"
+    )
+    # A listening CDP port is READY only when the same process set contains our
+    # expected user-data-dir + remote-debugging-port pair.
+    assert "$managed.Count -gt 0" in ensure
 
 
 def test_supervisor_never_kills_foreign_profile_owner():
@@ -58,6 +78,19 @@ def test_legacy_autopilot_only_runs_when_fast_path_is_disabled():
     assert "PROFI_FAST_PATH" in text
     assert "run-autopilot-win.ps1" in text
     assert "Stop-LegacyAutopilot" in text
+
+
+def test_autopilot_detection_includes_orphan_python_child():
+    text = _text(SUPERVISOR)
+    section = text[
+        text.index("function Get-AutopilotRunnerProcesses") : text.index(
+            "function Stop-LegacyAutopilot"
+        )
+    ]
+    assert "python.exe" in section
+    assert "profi.main" in section
+    assert "autopilot" in section
+    assert "--rhythm-tag" in section
 
 
 def test_stop_win_can_target_one_account_and_stops_supervisor_children_not_chrome():
