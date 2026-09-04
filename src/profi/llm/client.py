@@ -134,7 +134,9 @@ def _post(url: str, headers: dict, payload: dict) -> dict:
         raise RuntimeError(f"HTTP {e.code} от {url}: {body}") from e
 
 
-def _chat_openai_style(system: str, user: str, temperature: float, max_tokens: int) -> str:
+def _chat_openai_style(
+    system: str, user: str, temperature: float, max_tokens: int, model: str
+) -> str:
     """OpenAI-совместимый протокол (glm, openai). С фоллбэком на второй ключ."""
     keys: list[tuple[str, str]] = []
     key, kname = _key(provider())
@@ -153,7 +155,7 @@ def _chat_openai_style(system: str, user: str, temperature: float, max_tokens: i
                 _base(provider()) + "/chat/completions",
                 {"Content-Type": "application/json", "Authorization": f"Bearer {k}"},
                 {
-                    "model": _model(provider()),
+                    "model": model,
                     "messages": [
                         {"role": "system", "content": system},
                         {"role": "user", "content": user},
@@ -177,7 +179,7 @@ def _chat_anthropic(system: str, user: str, temperature: float, max_tokens: int,
     """Anthropic Messages API; совместимо и с прокси GLM (claude-buffet и др.).
 
     Цепочка ключей: ANTHROPIC_AUTH_TOKEN/API_KEY → GLM_API_KEY_2/ZAI_API_KEY_2
-    (второй z.ai-аккаунт) — фолбэк при 429/лимите первого, как в openai-пути.
+    (второй z.ai-аккаунт) — фоллбэк при 429/лимите первого, как в openai-пути.
     """
     keys: list[tuple[str, str]] = []
     key, kname = _key("anthropic")
