@@ -9,6 +9,7 @@ from profi.copy_style import (
     OUTREACH_STYLE_OVERRIDE,
     client_copy_issues,
     style_retry_instruction,
+    style_variation,
 )
 from profi.llm.client import (
     chat as _chat,
@@ -61,7 +62,10 @@ def chat(
         return _chat(system, user, temperature, max_tokens, model)
 
     override = OUTREACH_STYLE_OVERRIDE if channel == "outreach" else CHAT_STYLE_OVERRIDE
-    styled_system = system + override
+    # main.py still carries the older cosmetic _style_variation(). Appending
+    # the structural variant here makes the last instruction about message
+    # shape, not about random punctuation.
+    styled_system = system + override + style_variation(channel)
     first = _chat(styled_system, user, temperature, max_tokens, model)
 
     first_text = _copy_text(first, channel)
