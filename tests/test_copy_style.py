@@ -33,7 +33,7 @@ class TestClientCopyIssues:
         )
         issues = client_copy_issues(text, channel="outreach")
         assert any("задача понятна" in issue for issue in issues)
-        assert any("поэтому" in issue for issue in issues)
+        assert any("переход к методике" in issue for issue in issues)
         assert any("формат" in issue for issue in issues)
         assert "больше одного вопроса" in issues
 
@@ -52,7 +52,7 @@ class TestClientCopyIssues:
 
     def test_overrides_focus_on_function_not_fake_typos(self):
         assert "мини-презентацию" in OUTREACH_STYLE_OVERRIDE
-        assert "не добавляй нарочно опечатки" in OUTREACH_STYLE_OVERRIDE
+        assert "не добавляй нарочно опечатки" in OUTREACH_STYLE_OVERRIDE.lower()
         assert "последний прямой вопрос" in CHAT_STYLE_OVERRIDE
 
 
