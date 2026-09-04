@@ -133,9 +133,7 @@ AVAILABILITY_EVENT_NAMES = {
     "browser_exit_early",
 }
 
-LINE_TS_RE = re.compile(
-    r"^\[?(?P<ts>\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2})"
-)
+LINE_TS_RE = re.compile(r"^\[?(?P<ts>\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2})")
 LEVEL_RE = re.compile(r"\b(?P<level>CRITICAL|ERROR|WARNING)\b")
 CANONICAL_LOG_RE = re.compile(
     r"^(?P<source>worker|browser|autopilot|supervisor)"
