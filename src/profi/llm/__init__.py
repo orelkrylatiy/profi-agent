@@ -11,8 +11,8 @@ from profi.copy_style import (
     style_retry_instruction,
     style_variation,
 )
+from profi.llm.client import chat as _chat
 from profi.llm.client import (
-    chat as _chat,
     is_limit_error,
     json_reply,
     models_chain,
