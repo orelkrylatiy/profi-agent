@@ -17,6 +17,19 @@ function Write-Log([string]$Message) {
     Add-Content -Path $logFile -Value $line -Encoding UTF8
 }
 
+# The launcher is idempotent, but direct/concurrent supervisor starts must also
+# be safe. A process-lifetime named mutex closes the last race between two
+# start-win invocations that both inspect the process table at the same time.
+$safeAccount = [regex]::Replace($Account, '[^A-Za-z0-9_.-]', '_')
+$mutexName = "Local\ProfiAgentSupervisor_$safeAccount"
+$createdNew = $false
+$script:supervisorMutex = [System.Threading.Mutex]::new($true, $mutexName, [ref]$createdNew)
+if (-not $createdNew) {
+    Write-Log "SUPERVISOR_DUPLICATE account=$Account — another owner already holds $mutexName"
+    $script:supervisorMutex.Dispose()
+    exit 0
+}
+
 $script:lastIssue = ""
 function Write-IssueOnce([string]$Code, [string]$Message) {
     if ($script:lastIssue -ne $Code) {
@@ -123,6 +136,17 @@ function Get-ProfileChromeProcesses {
     return @($result)
 }
 
+function Get-ManagedChromeProcesses {
+    return @(Get-ProfileChromeProcesses | Where-Object {
+        ([string]$_.CommandLine).IndexOf("--remote-debugging-port=$port", [System.StringComparison]::OrdinalIgnoreCase) -ge 0
+    })
+}
+
+function Test-ExpectedCdp {
+    if (-not (Test-Cdp)) { return $false }
+    return @(Get-ManagedChromeProcesses).Count -gt 0
+}
+
 function Start-ManagedBrowser {
     $chrome = Resolve-ChromePath
     New-Item -ItemType Directory -Force -Path $profile | Out-Null
@@ -138,7 +162,7 @@ function Start-ManagedBrowser {
     $proc = Start-Process -FilePath $chrome -ArgumentList $args -WindowStyle Minimized -PassThru
     $deadline = (Get-Date).AddSeconds(25)
     while ((Get-Date) -lt $deadline) {
-        if (Test-Cdp) {
+        if (Test-ExpectedCdp) {
             Write-Log "BROWSER_READY pid=$($proc.Id) port=$port"
             Clear-Issue
             return $true
@@ -156,12 +180,10 @@ function Start-ManagedBrowser {
 function Ensure-Browser {
     param([ref]$FailureCount)
 
-    if (Test-Cdp) {
-        $FailureCount.Value = 0
-        Clear-Issue
-        return $true
-    }
-
+    # Never trust a listening port by itself: another account/browser can own
+    # the same port. READY requires both the CDP endpoint and a Chrome process
+    # with this account's exact user-data-dir + remote-debugging-port.
+    $cdpUp = Test-Cdp
     $profileProcesses = @(Get-ProfileChromeProcesses)
     $managed = @($profileProcesses | Where-Object {
         ([string]$_.CommandLine).IndexOf("--remote-debugging-port=$port", [System.StringComparison]::OrdinalIgnoreCase) -ge 0
@@ -169,6 +191,16 @@ function Ensure-Browser {
     $foreign = @($profileProcesses | Where-Object {
         ([string]$_.CommandLine).IndexOf("--remote-debugging-port=$port", [System.StringComparison]::OrdinalIgnoreCase) -lt 0
     })
+
+    if ($cdpUp) {
+        $FailureCount.Value = 0
+        if ($managed.Count -gt 0) {
+            Clear-Issue
+            return $true
+        }
+        Write-IssueOnce "CDP_PORT_CONFLICT" "port=$port responds but expected profile=$profile is not its managed owner; waiting"
+        return $false
+    }
 
     # If the same profile is already owned by another Chrome without our CDP port,
     # fail closed. Never kill a user's/foreign profile owner automatically.
@@ -238,13 +270,16 @@ function Ensure-Worker {
 
 function Get-AutopilotRunnerProcesses {
     $result = @()
-    $processes = @(Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue)
+    $processes = @(Get-CimInstance Win32_Process -Filter "Name='powershell.exe' OR Name='python.exe' OR Name='pythonw.exe'" -ErrorAction SilentlyContinue)
     foreach ($proc in $processes) {
         $cmd = [string]$proc.CommandLine
         if (-not $cmd) { continue }
         $newRunner = $cmd.IndexOf("run-autopilot-win.ps1", [System.StringComparison]::OrdinalIgnoreCase) -ge 0 -and (Test-AccountToken $cmd "-Account")
         $legacyRunner = $cmd.IndexOf("profi-loop-$Account.ps1", [System.StringComparison]::OrdinalIgnoreCase) -ge 0
-        if ($newRunner -or $legacyRunner) {
+        $pythonChild = $cmd.IndexOf("profi.main", [System.StringComparison]::OrdinalIgnoreCase) -ge 0 -and
+            $cmd.IndexOf("autopilot", [System.StringComparison]::OrdinalIgnoreCase) -ge 0 -and
+            (Test-AccountToken $cmd "--rhythm-tag")
+        if ($newRunner -or $legacyRunner -or $pythonChild) {
             $result += $proc
         }
     }
