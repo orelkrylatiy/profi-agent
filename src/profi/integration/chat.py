@@ -71,9 +71,12 @@ def _parse_dialog_card(text: str, href: str | None = None) -> dict | None:
         tail = tail[:-1]
 
     preview = " ".join(tail).strip()
-    # Направление известно только если preview вообще распарсен. Пустой preview
-    # считаем нереплайабельным (last_is_ours=None), а не «последнее клиентское».
+    # Направление известно только если preview вообще распарсен. Если preview
+    # пуст, обнуляем unread: текущий main фильтрует по unread, поэтому даже до
+    # перехода на select_reply_targets() такой диалог fail-closed не откроется.
     last_is_ours: bool | None = preview.startswith("Вы:") if preview else None
+    if not preview:
+        unread = 0
 
     return {
         "name": name,
