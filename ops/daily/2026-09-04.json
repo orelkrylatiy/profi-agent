@@ -2,16 +2,17 @@
   "accounts": {
     "info": {
       "candidates": {
-        "created": 4,
+        "created": 8,
         "current_details_errors": 6,
         "current_draft_errors": 11,
         "current_send_status": {
+          "failed": 1,
           "not_sent": 19,
-          "sent": 7,
-          "skipped": 124
+          "sent": 8,
+          "skipped": 126
         },
-        "details_ready": 4,
-        "drafts_generated": 0
+        "details_ready": 8,
+        "drafts_generated": 4
       },
       "chat": {
         "injection_guard": 0,
@@ -21,45 +22,48 @@
       },
       "db_read_error": false,
       "feed": {
-        "new_orders": 30,
-        "orders_seen": 41
+        "new_orders": 49,
+        "orders_seen": 60
       },
       "log_events": {
         "feed_capture_error": 3
       },
       "responses": {
         "missing_payment_records": 0,
-        "modes": {},
+        "modes": {
+          "commission": 1
+        },
         "recorded_paid_rub": 0,
-        "sent": 0,
+        "sent": 1,
         "unknown": 0
       }
     },
     "lang": {
       "candidates": {
-        "created": 119,
+        "created": 172,
         "current_details_errors": 26,
         "current_draft_errors": 46,
         "current_send_status": {
-          "failed": 5,
-          "not_sent": 97,
+          "failed": 9,
+          "not_sent": 98,
+          "sending": 1,
           "sent": 25,
-          "skipped": 387,
+          "skipped": 434,
           "unknown": 1
         },
-        "details_ready": 115,
-        "drafts_generated": 45
+        "details_ready": 167,
+        "drafts_generated": 93
       },
       "chat": {
         "injection_guard": 0,
         "needs_human": 0,
         "send_failed": 0,
-        "tutor_replies": 6
+        "tutor_replies": 13
       },
       "db_read_error": false,
       "feed": {
-        "new_orders": 132,
-        "orders_seen": 149
+        "new_orders": 189,
+        "orders_seen": 206
       },
       "log_events": {
         "auth_required": 1,
@@ -67,7 +71,7 @@
         "cdp_reconnect": 31,
         "feed_capture_error": 3,
         "order_open_fail": 149,
-        "tab_hygiene": 73,
+        "tab_hygiene": 74,
         "traceback": 4
       },
       "responses": {
@@ -81,9 +85,9 @@
       }
     }
   },
-  "code_revision": "497b92c5e27d",
+  "code_revision": "d085ec0bec85",
   "date": "2026-09-04",
-  "generated_at": "2026-09-04T14:56:31+05:00",
+  "generated_at": "2026-09-04T16:49:30+05:00",
   "logs": {
     "events": {
       "auth_required": 1,
@@ -91,15 +95,15 @@
       "cdp_reconnect": 31,
       "feed_capture_error": 6,
       "order_open_fail": 149,
-      "tab_hygiene": 73,
+      "tab_hygiene": 74,
       "traceback": 4
     },
     "files_scanned": 12,
     "levels": {
       "error": 32,
-      "warning": 336
+      "warning": 341
     },
-    "lines_for_day": 3366
+    "lines_for_day": 4260
   },
   "privacy": {
     "aggregate_only": true,
@@ -113,13 +117,13 @@
   "schema_version": 1,
   "timezone": "Asia/Yekaterinburg",
   "totals": {
-    "candidates_created": 123,
-    "chat_replies": 6,
+    "candidates_created": 180,
+    "chat_replies": 13,
     "needs_human": 0,
-    "new_orders": 162,
+    "new_orders": 238,
     "recorded_paid_rub": 0,
-    "responses_sent": 20,
+    "responses_sent": 21,
     "responses_unknown": 1,
-    "technical_error_events": 311
+    "technical_error_events": 312
   }
 }

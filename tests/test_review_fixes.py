@@ -84,7 +84,8 @@ class TestVacancyGate:
 
 class TestChatSystemPersona:
     """CHAT_SYSTEM должен говорить персоной АККАУНТА, а не «репетитором
-    информатики» для всех (ревью P0-2), и брать ставку из config.RATE."""
+    информатики» для всех (ревью P0-2). С 04.09 (решение владельца) промпт
+    НЕ называет цену/ставку — в commission цена не для текстов клиенту."""
 
     def test_lang_persona_in_chat(self, monkeypatch):
         # config.PERSONA читается при импорте конфига — патчим атрибут,
@@ -94,14 +95,17 @@ class TestChatSystemPersona:
             mod = importlib.reload(main)
             assert "английск" in mod.CHAT_SYSTEM
             assert "информатик" not in mod.CHAT_SYSTEM
-            assert str(mod.config.RATE) in mod.CHAT_SYSTEM  # ставка из config, не литерал
+            assert str(mod.config.RATE) not in mod.CHAT_SYSTEM  # цену не называем
         finally:
             monkeypatch.undo()
             importlib.reload(main)
 
-    def test_default_persona_and_rate(self):
-        assert "ставка" in main.CHAT_SYSTEM
-        assert str(main.config.RATE) in main.CHAT_SYSTEM
+    def test_default_persona_no_price(self):
+        # 04.09: цену/ставку не называем ни в чате, ни в отклике
+        assert "ЦЕНУ И СТАВКУ НЕ НАЗЫВАТЬ" in main.CHAT_SYSTEM
+        assert str(main.config.RATE) not in main.CHAT_SYSTEM
+        assert "60–90" not in main.CHAT_SYSTEM
+        assert "60–90" not in main.TRIAGE_SYSTEM
 
     def test_triage_has_goal_and_json(self):
         assert "ЦЕЛЬ отклика" in main.TRIAGE_SYSTEM

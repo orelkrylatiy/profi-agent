@@ -27,3 +27,24 @@ def has_contacts(text: str) -> bool:
     if _CONTACTS_RE.search(text):
         return True
     return any(_looks_like_phone(m.group(0)) for m in _PHONE_RUN_RE.finditer(text))
+
+
+# Цена: цифры рядом с валютой/единицей ставки. В тарифе commission цену
+# клиенту в текстах не пишем (решение владельца 04.09).
+_PRICE_RE = re.compile(
+    r"\d[\d\s ]{0,6}\s*(?:₽|руб|тыс|/час|в час|за час|за урок|за занятие)"
+    r"|(?:ставк\w*|цена|стоимость)\s*[:—-]?\s*\d",
+    re.I,
+)
+
+
+def has_price(text: str) -> bool:
+    """True, если в тексте упомянута цена/ставка."""
+    return bool(_PRICE_RE.search(text))
+
+
+def strip_price_sentences(text: str) -> tuple[str, int]:
+    """Вырезать предложения с ценой. Возврат: (текст, число срезанных)."""
+    parts = re.split(r"(?<=[.!?])\s+", text.strip())
+    kept = [s for s in parts if not _PRICE_RE.search(s)]
+    return " ".join(kept), len(parts) - len(kept)
