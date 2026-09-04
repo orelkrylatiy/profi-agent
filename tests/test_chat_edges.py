@@ -164,9 +164,7 @@ class TestTargetSelection:
         assert [d["name"] for d in chat.select_reply_targets(dialogs)] == ["client"]
 
     def test_limit_two_and_order_preserved(self):
-        dialogs = [
-            {"name": str(i), "unread": 1, "last_is_ours": False} for i in range(5)
-        ]
+        dialogs = [{"name": str(i), "unread": 1, "last_is_ours": False} for i in range(5)]
         assert [d["name"] for d in chat.select_reply_targets(dialogs)] == ["0", "1"]
 
     def test_zero_limit(self):
