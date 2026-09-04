@@ -27,6 +27,10 @@
   перед children, чтобы не было respawn-race. Chrome при stop намеренно остаётся.
 - [x] **Windows rollback compatibility**: отдельный 120-с autopilot-loop запускается
   только при явном `PROFI_FAST_PATH=0`.
+- [x] **Безопасный hardening чатов без DOM-переделки**: бот не дописывает поверх
+  ручного draft, ошибки чтения поля после Enter теперь fail-closed; chat-style не
+  придумывает свободные временные окна и не использует `needs_human`; legacy
+  `chat_cron.sh` поднимает Chrome только при явном `cdp_dead`.
 
 ## Бэклог
 
@@ -65,3 +69,49 @@ Unit/static tests закрывают policy и PowerShell parsing, но посл
   cookies, ключи, сырые чаты/заказы;
 - старые Mac/VPS legacy-autopilot entrypoints со временем можно удалить после
   подтверждения, что fast-path стабилен в production.
+
+### 7. Чаты: reliability / корректная модель сообщений
+
+Сейчас chat-auto рабочий на happy path, но источником истины остаются sidebar/ARIA
+и `unread`, а в LLM передаётся `body.inner_text()[-4000:]`. До полностью
+автономного режима нужно заменить это на устойчивую message-state модель.
+
+- [ ] **Stable dialog identity вместо имени.** `list_dialogs()` сейчас оставляет
+  только первое слово имени, а `open_dialog_by_name(...).first` может открыть не
+  тот диалог при двух Аннах/Александрах. Нужно до клика получать href/order-id или
+  другой стабильный идентификатор и после открытия проверять expected id.
+- [ ] **Durable incoming-message state.** Открытие unread-диалога может само снять
+  unread. Если после этого упали LLM/JSON/postcheck/send, клиентское сообщение
+  способно навсегда исчезнуть из `targets`. Нужны `conversation_id +
+  last_client_message_id/fingerprint` и состояния `pending/generating/sending/
+  sent/unknown`, не UI-бейдж как очередь.
+- [ ] **Отмечать reply независимо от успеха автоответа.** `first_client_reply_at`
+  должен фиксироваться в момент надёжного наблюдения нового клиентского сообщения,
+  а не как побочный эффект успешного `log_chat(tutor/system)`. Иначе A/B/C reply
+  rate смещён в сторону сообщений, которые агент сумел обработать.
+- [ ] **Передавать в LLM только активный диалог.** Сейчас `read_dialog_text()` берёт
+  весь `body`, куда могут попасть превью соседних клиентов и служебный UI. Нужен
+  контейнер текущей переписки или структурированный список последних сообщений
+  `{sender,text}`. Перед внедрением нужен живой DOM/ARIA smoke на текущем Profi.
+- [ ] **Повторно проверять turn ownership перед send.** Между sidebar-проверкой
+  `last_is_ours=false` и Enter владелец может вручную ответить. Перед необратимой
+  отправкой нужно сверять, что последнее клиентское message-id/fingerprint не
+  изменилось и нового tutor message нет.
+- [ ] **Настоящий delivery proof.** Текущее опустевшее поле — только слабый сигнал.
+  После отправки нужно дождаться нового outgoing bubble/message-id с нашим текстом;
+  невозможность доказать исход → `unknown`, а не `sent` и не автоматический retry.
+- [ ] **Retry после transient failure.** LLM timeout/invalid JSON/send failure не
+  должны терять уже прочитанное сообщение. Retry должен идти из durable queue,
+  даже если sidebar `unread=0` или legacy `changed=false`.
+- [ ] **Не связывать SLA чатов только с успешным feed cycle.** Сейчас встроенный
+  `run_chat_auto()` вызывается каждый N-й `state == OK`; длинный/ошибочный feed
+  откладывает ответ уже заинтересованному клиенту. При переходе к единому browser
+  owner нужен независимый `chat_due` внутри того же runtime.
+- [ ] **Убрать legacy chat cron после smoke integrated path.** Пока он нужен для
+  rollback, но отдельный `changed` trigger имеет другие retry semantics и может
+  расходиться с worker. После подтверждения Windows/Mac integrated chat оставить
+  один authoritative scheduler.
+- [ ] **Набор интеграционных regression-тестов:** одинаковые имена; client message
+  стал read до LLM-error; ручной draft; owner ответил во время LLM; поле очистилось,
+  но outgoing bubble не появился; opened order-id mismatch; два/три unread и
+  ошибки первых диалогов; message-fingerprint/idempotency.
