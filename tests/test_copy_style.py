@@ -5,8 +5,12 @@ import json
 import profi.llm as llm
 from profi.copy_style import (
     CHAT_STYLE_OVERRIDE,
+    OUTREACH_EXPERIMENT_ID,
+    OUTREACH_EXPERIMENT_MARKER,
     OUTREACH_STYLE_OVERRIDE,
+    OUTREACH_VARIANT_IDS,
     client_copy_issues,
+    outreach_variant_prompt,
     style_retry_instruction,
 )
 
@@ -42,22 +46,30 @@ class TestClientCopyIssues:
         )
         assert any("слишком длинно" in issue for issue in client_copy_issues(text))
 
-    def test_style_retry_preserves_facts_and_asks_for_concrete_offer(self):
+    def test_style_retry_preserves_experiment_arm(self):
         hint = style_retry_instruction(["слишком длинно", "больше одного вопроса"])
-        assert "ничего нового не придумывай" in hint
-        assert "конкретный оффер" in hint
-        assert "глубокая персонализация не нужна" in hint.lower()
+        assert "ТОТ ЖЕ экспериментальный вариант" in hint
+        assert "ничего нового не придумывай" in hint.lower()
         assert "максимум один вопрос" in hint
 
+    def test_all_three_versioned_prompts_exist(self):
+        assert OUTREACH_VARIANT_IDS == ("A", "B", "C")
+        for variant in OUTREACH_VARIANT_IDS:
+            prompt = outreach_variant_prompt(variant)
+            assert OUTREACH_STYLE_OVERRIDE in prompt
+            assert OUTREACH_EXPERIMENT_ID in prompt
+            assert f"VARIANT={variant}" in prompt
+            assert OUTREACH_EXPERIMENT_MARKER in prompt
+
     def test_overrides_prefer_offer_over_deep_personalization(self):
-        assert "конкретно предложи помощь" in OUTREACH_STYLE_OVERRIDE.lower()
-        assert "персонализация необязательна" in OUTREACH_STYLE_OVERRIDE.lower()
+        assert "конкретный оффер" in OUTREACH_STYLE_OVERRIDE.lower()
+        assert "глубокая персонализация" in OUTREACH_STYLE_OVERRIDE.lower()
         assert "не добавляй нарочно опечатки" in OUTREACH_STYLE_OVERRIDE.lower()
         assert "последний прямой вопрос" in CHAT_STYLE_OVERRIDE
 
 
 class TestClientCopyMiddleware:
-    def test_outreach_style_retry_returns_better_second_draft(self, monkeypatch):
+    def test_outreach_experiment_arm_survives_style_retry(self, monkeypatch):
         calls = []
         first = _raw(
             verdict="send",
@@ -84,18 +96,32 @@ class TestClientCopyMiddleware:
             return next(answers)
 
         monkeypatch.setattr(llm, "_chat", fake_chat)
-        result = llm.chat(
-            "ЦЕЛЬ отклика — договориться на пробное занятие. ",
-            "order",
-            temperature=0.4,
-            max_tokens=3000,
-            model="fake",
-        )
+        system = "ЦЕЛЬ отклика — договориться на пробное занятие. " + outreach_variant_prompt("A")
+        result = llm.chat(system, "order", temperature=0.4, max_tokens=3000, model="fake")
 
         assert result == second
         assert len(calls) == 2
+        assert all("VARIANT=A" in call for call in calls)
+        assert all(call.count(OUTREACH_EXPERIMENT_MARKER) == 1 for call in calls)
+
+    def test_non_experiment_outreach_still_gets_common_override(self, monkeypatch):
+        calls = []
+        answer = _raw(
+            verdict="send",
+            reason="ok",
+            text=(
+                "Здравствуйте! Могу помочь с подготовкой. Предлагаю начать с "
+                "пробного занятия. Когда вам удобно?"
+            ),
+        )
+
+        def fake_chat(system, user, temperature, max_tokens, model):
+            calls.append(system)
+            return answer
+
+        monkeypatch.setattr(llm, "_chat", fake_chat)
+        llm.chat("ЦЕЛЬ отклика — договориться на пробное занятие. ", "order", model="fake")
         assert OUTREACH_STYLE_OVERRIDE in calls[0]
-        assert "Предыдущий черновик отклонён" in calls[1]
 
     def test_retry_failure_keeps_first_valid_response(self, monkeypatch):
         first = _raw(
@@ -116,11 +142,8 @@ class TestClientCopyMiddleware:
             raise RuntimeError("temporary provider error")
 
         monkeypatch.setattr(llm, "_chat", fake_chat)
-        result = llm.chat(
-            "ЦЕЛЬ отклика — договориться на пробное занятие. ",
-            "order",
-            model="fake",
-        )
+        system = "ЦЕЛЬ отклика — договориться на пробное занятие. " + outreach_variant_prompt("B")
+        result = llm.chat(system, "order", model="fake")
         assert result == first
         assert calls == 2
 
