@@ -4,7 +4,6 @@ import shutil
 import subprocess
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 START = ROOT / "scripts" / "start-win.ps1"
 STOP = ROOT / "scripts" / "stop-win.ps1"
@@ -32,7 +31,7 @@ def test_supervisor_owns_browser_lifecycle_but_worker_keeps_no_launch():
     assert "--remote-debugging-port=" in text
     assert "--user-data-dir=" in text
     assert "PROFI_CHROME_NO_LAUNCH" in text
-    assert '"1"' in text or "='1'" in text or "= \"1\"" in text
+    assert '"1"' in text or "='1'" in text or '= "1"' in text
 
 
 def test_supervisor_never_kills_foreign_profile_owner():
