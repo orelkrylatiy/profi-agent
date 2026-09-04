@@ -60,10 +60,10 @@ jobs:
         run: uv sync
 
       - name: Ruff autofix
-        run: uv run ruff check --fix src/profi/fastpath.py src/profi/main.py src/profi/storage/store.py tests/test_fast_path.py tests/test_fast_path_edges.py
+        run: uv run ruff check --fix src/profi/config.py src/profi/fastpath.py src/profi/main.py src/profi/storage/store.py tests/test_fast_path.py tests/test_fast_path_edges.py
 
       - name: Format changed Python
-        run: uv run ruff format src/profi/fastpath.py src/profi/main.py src/profi/storage/store.py tests/test_fast_path.py tests/test_fast_path_edges.py
+        run: uv run ruff format src/profi/config.py src/profi/fastpath.py src/profi/main.py src/profi/storage/store.py tests/test_fast_path.py tests/test_fast_path_edges.py
 
       - name: Ruff lint
         run: uv run ruff check .
@@ -85,6 +85,6 @@ jobs:
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/profi/main.py src/profi/fastpath.py src/profi/storage/store.py tests/test_fast_path.py tests/test_fast_path_edges.py
+          git add src/profi/config.py src/profi/main.py src/profi/fastpath.py src/profi/storage/store.py tests/test_fast_path.py tests/test_fast_path_edges.py
           git commit -m "fix: close fast-path idempotency and migration edges"
           git push
