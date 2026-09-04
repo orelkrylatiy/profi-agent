@@ -6,6 +6,7 @@ import logging
 
 from profi.copy_style import (
     CHAT_STYLE_OVERRIDE,
+    OUTREACH_EXPERIMENT_MARKER,
     OUTREACH_STYLE_OVERRIDE,
     client_copy_issues,
     style_retry_instruction,
@@ -52,22 +53,24 @@ def chat(
 ) -> str:
     """Call the provider and conditionally retry obviously templated client copy.
 
-    Only the two client-facing prompts are touched. The retry is best-effort:
-    provider errors or invalid retry JSON fall back to the first valid response,
-    so copy polish can never turn a usable lead into a technical failure.
+    Outreach A/B/C composition is assigned before this layer and must remain
+    unchanged across retries. Chat keeps a little non-experimental variation.
+    The retry is best-effort: a style failure can never lose a usable lead.
     """
-
     channel = _copy_channel(system)
     if channel is None:
         return _chat(system, user, temperature, max_tokens, model)
 
-    override = OUTREACH_STYLE_OVERRIDE if channel == "outreach" else CHAT_STYLE_OVERRIDE
-    # main.py still carries the older cosmetic _style_variation(). Appending
-    # the structural variant here makes the last instruction about message
-    # shape, not about random punctuation.
-    styled_system = system + override + style_variation(channel)
-    first = _chat(styled_system, user, temperature, max_tokens, model)
+    if channel == "outreach":
+        # Experiment-aware callers already appended the exact versioned arm.
+        # Non-experiment/manual callers still get the common final style rules.
+        styled_system = (
+            system if OUTREACH_EXPERIMENT_MARKER in system else system + OUTREACH_STYLE_OVERRIDE
+        )
+    else:
+        styled_system = system + CHAT_STYLE_OVERRIDE + style_variation("chat")
 
+    first = _chat(styled_system, user, temperature, max_tokens, model)
     first_text = _copy_text(first, channel)
     if not first_text:
         return first
