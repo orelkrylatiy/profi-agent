@@ -45,5 +45,8 @@ jobs:
       - name: Install dependencies
         run: uv sync
 
-      - name: Windows supervisor tests
-        run: uv run pytest -q tests/test_windows_supervisor.py
+      - name: Windows supervisor and native-process tests
+        run: >-
+          uv run pytest -q
+          tests/test_windows_supervisor.py
+          tests/test_windows_native_stderr.py
