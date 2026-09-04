@@ -4,7 +4,6 @@ import pytest
 
 from profi.profiles import load_profile
 
-
 ROOT = Path(__file__).resolve().parents[1]
 PROFILES = ROOT / "profiles"
 
