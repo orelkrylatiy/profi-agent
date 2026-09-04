@@ -1,0 +1,87 @@
+name: Fast-path branch check
+
+on:
+  push:
+    branches: [feature/fast-path-fallback-20260904]
+
+permissions:
+  contents: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.11"
+
+      - name: Apply final narrow integration fixes
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          main = Path("src/profi/main.py")
+          text = main.read_text(encoding="utf-8")
+          marker = '    if config.FAST_PATH_ENABLED:\n        log.debug("autopilot: fast-path enabled — legacy consumer disabled")\n        return 0\n'
+          if marker not in text:
+              needle = '''    from profi import llm as llm_mod\n\n    now = _dt.now()\n'''
+              if text.count(needle) != 1:
+                  raise SystemExit(f"run_autopilot insertion point count={text.count(needle)}")
+              replacement = '''    from profi import llm as llm_mod\n\n    if config.FAST_PATH_ENABLED:\n        log.debug("autopilot: fast-path enabled — legacy consumer disabled")\n        return 0\n\n    now = _dt.now()\n'''
+              text = text.replace(needle, replacement)
+              main.write_text(text, encoding="utf-8")
+
+          fp = Path("src/profi/fastpath.py")
+          text = fp.read_text(encoding="utf-8")
+          old = '''    except Exception as exc:\n        store.set_send_status(order_id, "failed")\n        store.set_note(order_id, f"fast-path click failed: {str(exc)[:180]}")\n        return "failed"\n\n    url_after = str(outcome.get("url_after") or "")\n'''
+          new = '''    except Exception as exc:\n        # click_send уже начал необратимую операцию: при потере связи нельзя\n        # утверждать, что отправки не было. unknown terminal предотвращает retry.\n        store.set_send_status(order_id, "unknown")\n        store.record_response(order_id, config.RESPOND_MODE, due)\n        store.set_note(order_id, f"fast-path click outcome unknown: {str(exc)[:180]}")\n        return "unknown"\n\n    url_after = str(outcome.get("url_after") or "")\n'''
+          if old in text:
+              text = text.replace(old, new)
+              fp.write_text(text, encoding="utf-8")
+          elif "fast-path click outcome unknown" not in text:
+              raise SystemExit("fastpath click exception block not found")
+
+          tests = Path("tests/test_fast_path.py")
+          text = tests.read_text(encoding="utf-8")
+          anchor = '''        monkeypatch.setattr(main.config, "DB_PATH", db)\n'''
+          injected = '''        monkeypatch.setattr(main.config, "FAST_PATH_ENABLED", False)\n        monkeypatch.setattr(main.config, "DB_PATH", db)\n'''
+          if injected not in text:
+              if text.count(anchor) != 1:
+                  raise SystemExit(f"legacy test anchor count={text.count(anchor)}")
+              text = text.replace(anchor, injected)
+              tests.write_text(text, encoding="utf-8")
+          PY
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Format changed Python
+        run: uv run ruff format src/profi/fastpath.py src/profi/main.py src/profi/storage/store.py tests/test_fast_path.py tests/test_fast_path_edges.py
+
+      - name: Ruff lint
+        run: uv run ruff check .
+
+      - name: ShellCheck
+        run: git ls-files 'scripts/**/*.sh' | xargs -n1 shellcheck
+
+      - name: Tests
+        run: uv run pytest -q
+
+      - name: Ruff format check
+        run: uv run ruff format --check .
+
+      - name: Commit validated generated fixes
+        run: |
+          if git diff --quiet; then
+            echo "branch already finalized"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/profi/main.py src/profi/fastpath.py src/profi/storage/store.py tests/test_fast_path.py tests/test_fast_path_edges.py
+          git commit -m "fix: close fast-path idempotency and migration edges"
+          git push
