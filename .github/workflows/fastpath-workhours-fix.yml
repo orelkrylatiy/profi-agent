@@ -47,13 +47,14 @@ jobs:
               text = text.replace(click_anchor, click_gate, 1)
           path.write_text(text, encoding="utf-8")
 
-          # Existing happy/error send unit tests previously depended on wall clock.
-          # Make their precondition explicit; dedicated work-hours tests own boundary behavior.
+          # Existing happy/error send tests need an explicit in-hours precondition.
           for test_path in (Path("tests/test_fast_path.py"), Path("tests/test_fast_path_edges.py")):
               test = test_path.read_text(encoding="utf-8")
+              if "import pytest" not in test:
+                  anchor = "from __future__ import annotations\n"
+                  test = test.replace(anchor, anchor + "\nimport pytest\n", 1)
               fixture = '''\n\n@pytest.fixture(autouse=True)\ndef _fastpath_inside_work_hours(monkeypatch):\n    import profi.fastpath as fastpath\n\n    monkeypatch.setattr(fastpath, "in_work_hours", lambda: True)\n'''
               if "def _fastpath_inside_work_hours" not in test:
-                  # Both files already import pytest; place fixture before helpers/classes.
                   if "ROOT = " in test:
                       idx = test.index("ROOT = ")
                       test = test[:idx] + fixture + "\n" + test[idx:]
@@ -61,7 +62,7 @@ jobs:
                       marker = "\n\ndef _details"
                       idx = test.index(marker)
                       test = test[:idx] + fixture + test[idx:]
-                  test_path.write_text(test, encoding="utf-8")
+              test_path.write_text(test, encoding="utf-8")
           PY
 
       - name: Install and full gate
