@@ -112,7 +112,9 @@ def chat(
             system if OUTREACH_EXPERIMENT_MARKER in system else system + OUTREACH_STYLE_OVERRIDE
         )
     else:
-        styled_system = _normalize_chat_system(system) + CHAT_STYLE_OVERRIDE + style_variation("chat")
+        styled_system = (
+            _normalize_chat_system(system) + CHAT_STYLE_OVERRIDE + style_variation("chat")
+        )
 
     first = _chat(styled_system, user, temperature, max_tokens, model)
     first_text = _copy_text(first, channel)
