@@ -1,7 +1,7 @@
-"""Style guardrails for client-facing Profi messages.
+"""Style guardrails and A/B/C variants for client-facing Profi messages.
 
-The goal is not to "beat" AI detectors. It is to keep outreach useful and
-message-like: a concrete offer, a simple first step, and one next action.
+The experiment tests message structure, not fake typos or cosmetic punctuation.
+Each order is assigned one stable variant in SQLite before generation.
 """
 
 from __future__ import annotations
@@ -10,27 +10,43 @@ import random
 import re
 from collections.abc import Sequence
 
+OUTREACH_EXPERIMENT_ID = "outreach_offer_v1"
+OUTREACH_VARIANT_IDS = ("A", "B", "C")
+OUTREACH_EXPERIMENT_MARKER = "OUTREACH_EXPERIMENT="
+
 OUTREACH_STYLE_OVERRIDE = (
     "ФИНАЛЬНЫЙ СТИЛЬ ОТКЛИКА (эти правила важнее общих пожеланий выше): "
     "пиши как одно короткое сообщение в чате, не как мини-презентацию. "
-    "Основной каркас: конкретно предложи помощь («могу помочь с ...» / "
-    "«готов помочь с ...»), затем одной фразой скажи, как предлагаешь начать, "
-    "и закончи одним простым следующим шагом. "
-    "Обычно 2–4 предложения и примерно 180–340 символов; не заполняй лимит "
-    "ради объёма. Персонализация необязательна: не вытягивай из заявки редкие "
-    "детали ради эффекта. Обычно достаточно предмета или основной цели клиента, "
-    "а иногда и этого не нужно. "
-    "Не пересказывай заявку и не перечисляй одновременно цель клиента, методику, "
-    "формат, длительность и пробное. Онлайн и 60–90 минут НЕ обязаны быть в каждом "
-    "первом отклике: упоминай логистику только когда она помогает сделать предложение "
-    "конкретнее. Один вопросительный знак максимум. "
-    "Не доказывай экспертность демонстрационными английскими фразами, названиями "
-    "учебников, методик или buzzword-ами. Даже если в заявке есть необычная деталь, "
-    "не надо обязательно отражать её в отклике. "
-    "Лучше нормальное «могу помочь, предлагаю начать так» без глубокой персонализации, "
-    "чем гладкий рекламный абзац. Не добавляй нарочно опечатки, ошибки, улыбки или "
-    "разговорные слова только ради «человечности». "
+    "Нужен конкретный оффер, а не глубокая персонализация. Обычно достаточно "
+    "предмета или основной цели клиента; не вытягивай из заявки редкие детали "
+    "ради эффекта. Не пересказывай заявку. Не демонстрируй экспертность "
+    "английскими фразами, названиями учебников, методик или buzzword-ами. "
+    "Обычно 2–4 предложения и примерно 160–320 символов; 500 — только потолок. "
+    "Онлайн, 60–90 минут, методика и пробное НЕ обязаны одновременно появляться "
+    "в каждом сообщении. Один вопросительный знак максимум. "
+    "Не добавляй нарочно опечатки, ошибки или улыбки ради «человечности». "
 )
+
+OUTREACH_VARIANTS: dict[str, str] = {
+    "A": (
+        "ВАРИАНТ A — DIRECT OFFER. Начни с прямого предложения помощи: "
+        "«Могу помочь с ...» или естественного эквивалента. Следующей фразой "
+        "предложи простой первый шаг, обычно пробное занятие. Закончи одним "
+        "вопросом про удобное время. Не объясняй всю методику."
+    ),
+    "B": (
+        "ВАРИАНТ B — DIAGNOSTIC. Сначала прямо скажи, что можешь помочь. Затем "
+        "конкретно предложи первое занятие как короткую диагностику: посмотреть "
+        "текущий уровень/что уже получается и после этого определить приоритет. "
+        "Закончи одним вопросом. Не добавляй другие детали только ради персонализации."
+    ),
+    "C": (
+        "ВАРИАНТ C — COMPACT NEXT STEP. Сделай самый короткий нормальный оффер: "
+        "предложи помощь, при необходимости дай только один действительно полезный "
+        "факт (например, что работаешь онлайн), и сразу предложи следующий шаг. "
+        "Один вопрос в конце. Никакой мини-презентации и демонстрации знаний."
+    ),
+}
 
 CHAT_STYLE_OVERRIDE = (
     "ФИНАЛЬНЫЙ СТИЛЬ ЧАТА: сначала ответь на последний прямой вопрос клиента. "
@@ -40,8 +56,8 @@ CHAT_STYLE_OVERRIDE = (
     "дай факт в первой фразе без вступления. "
 )
 
-# Patterns observed in the real outreach examples: they are not unsafe, but
-# they make otherwise personalized copy sound like the same generated scaffold.
+# Patterns observed in real outreach examples. They trigger one best-effort
+# rewrite attempt, never a terminal business decision.
 _AIISH_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (
         re.compile(r"\bзадач[аи]\s+(?:понятн|ясн)\w*", re.I),
@@ -81,18 +97,24 @@ _AIISH_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
 )
 
 
+def outreach_variant_prompt(variant: str) -> str:
+    """Return the exact versioned prompt suffix for an assigned experiment arm."""
+    if variant not in OUTREACH_VARIANTS:
+        raise ValueError(f"unknown outreach prompt variant: {variant!r}")
+    return (
+        OUTREACH_STYLE_OVERRIDE
+        + f"{OUTREACH_EXPERIMENT_MARKER}{OUTREACH_EXPERIMENT_ID}; VARIANT={variant}. "
+        + OUTREACH_VARIANTS[variant]
+        + " "
+    )
+
+
 def client_copy_issues(text: str, *, channel: str = "outreach") -> list[str]:
-    """Return style issues worth one cheap regeneration attempt.
-
-    Safety (contacts, links, etc.) stays in the existing text guard. This helper
-    only catches the most repetitive copy patterns and therefore must not be a
-    terminal business gate by itself.
-    """
-
+    """Return style issues worth one cheap regeneration attempt."""
     text = str(text or "").strip()
     issues: list[str] = []
 
-    preferred_max = 380 if channel == "outreach" else 450
+    preferred_max = 360 if channel == "outreach" else 450
     if len(text) > preferred_max:
         issues.append(f"слишком длинно ({len(text)} > {preferred_max})")
     if text.count("?") > 1:
@@ -109,36 +131,15 @@ def client_copy_issues(text: str, *, channel: str = "outreach") -> list[str]:
 
 def style_retry_instruction(issues: Sequence[str]) -> str:
     """Feedback appended only after a draft failed the style check."""
-
     short = "; ".join(str(issue) for issue in issues[:5])
     return (
         " Предыдущий черновик отклонён только по стилю: "
         + short
-        + ". Перепиши с нуля, сохрани факты, ничего нового не придумывай. "
-        "Сделай конкретный оффер: коротко предложи помощь, скажи, как предлагаешь "
-        "начать, и задай максимум один вопрос. Глубокая персонализация не нужна."
+        + ". Перепиши с нуля, сохрани факты и ТОТ ЖЕ экспериментальный вариант. "
+        "Ничего нового не придумывай. Сделай конкретный оффер, короче и проще, "
+        "максимум один вопрос. Глубокая персонализация не нужна."
     )
 
-
-_OUTREACH_SHAPES = (
-    (
-        "Вариант композиции: «Могу помочь с [задачей]. Предлагаю начать с "
-        "[простого первого шага]. [Один вопрос]». Не усложняй."
-    ),
-    (
-        "Вариант композиции: сначала прямое предложение помощи, затем конкретно "
-        "что предлагаешь сделать на первом занятии, затем один вопрос."
-    ),
-    (
-        "Вариант композиции: если важна логистика, дай один факт (например онлайн "
-        "или цена), затем предложи первый шаг и задай один вопрос."
-    ),
-    (
-        "Вариант композиции: обычный короткий оффер без глубокой персонализации. "
-        "Достаточно назвать предмет или цель, предложить, с чего начать, и спросить "
-        "про удобное время."
-    ),
-)
 
 _CHAT_SHAPES = (
     (
@@ -153,14 +154,12 @@ _CHAT_SHAPES = (
 )
 
 
-def style_variation(channel: str = "outreach") -> str:
-    """Vary message structure instead of forcing cosmetic punctuation quirks."""
-
-    shapes = _CHAT_SHAPES if channel == "chat" else _OUTREACH_SHAPES
-    shape = random.choice(shapes)
-    # Do not force a smile. It is allowed rarely when it fits the sentence,
-    # but forced random smiles quickly become their own automation signature.
-    if random.random() < (0.15 if channel == "chat" else 0.08):
+def style_variation(channel: str = "chat") -> str:
+    """Small chat-only variation; outreach variants stay fixed for clean experiments."""
+    if channel != "chat":
+        return ""
+    shape = random.choice(_CHAT_SHAPES)
+    if random.random() < 0.12:
         casual = (
             " Лёгкая «)» допустима только если сама естественно просится; специально не добавляй."
         )
