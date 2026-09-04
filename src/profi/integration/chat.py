@@ -23,6 +23,45 @@ def open_chats(page: Page) -> None:
     page.wait_for_timeout(3500)
 
 
+# Строка диалога в aria-снапшоте (живой DOM 04.09):
+#   «{имя} Вы: … N»    — последнее сообщение наше;
+#   «{имя} Робот: … N» — последнее сообщение СИСТЕМНОЕ: площадка шлёт
+#     «Робот: Сообщите, если договоритесь работать с клиентом» в том числе
+#     ПОСЛЕ наших сообщений (инцидент 04.09 «8 догонялок Алисе»: старый
+#     парсер не признавал нашу строку, считал диалог «клиент написал —
+#     отвечай» и писал снова и снова);
+#   «{имя} {текст} N»  — последнее сообщение клиента;
+# N в конце — счётчик непрочитанных (в DOM это отдельный элемент).
+_DIALOG_ROW_RE = re.compile(r"^(?P<name>\S+)(?:\s+(?P<who>Вы|Робот):)?\s*(?P<rest>.*)$")
+
+
+def classify_dialog_row(t: str) -> dict:
+    """Разобрать строку диалога из aria-снапшота.
+
+    Возвращает name, unread, who_last ('ours'|'system'|'client'),
+    last_is_ours, preview и last_text (текст последнего сообщения без
+    префикса имени/«Вы:» и без счётчика непрочитанных).
+    """
+    t = t.strip()
+    m = _DIALOG_ROW_RE.match(t)
+    name = m.group("name") if m else (t.split(" ", 1)[0] if t else "")
+    who = "client"
+    if m and m.group("who"):
+        who = "ours" if m.group("who") == "Вы" else "system"
+    um = re.search(r"\s(\d{1,3})\s*$", t)
+    unread = int(um.group(1)) if um else 0
+    rest = (m.group("rest") if m else "").strip()
+    last_text = re.sub(r"\s+\d{1,3}\s*$", "", rest).strip()
+    return {
+        "name": name,
+        "unread": unread,
+        "who_last": who,
+        "last_is_ours": who == "ours",
+        "preview": t[:160],
+        "last_text": last_text[:400],
+    }
+
+
 def list_dialogs(page: Page) -> list[dict]:
     """Диалоги из aria-снапшота: строка имени идёт сразу после абзаца-аватара
     (одиночная буква) — это устойчивый признак строки диалога."""
@@ -36,18 +75,8 @@ def list_dialogs(page: Page) -> list[dict]:
             continue
         if prev_avatar and line_s.startswith("- text: "):
             t = line_s[len("- text: ") :].strip().strip('"').strip()
-            name = t.split(" ", 1)[0]
-            m = re.search(r"(\d+)\s*$", t)
-            unread = int(m.group(1)) if m else 0
-            dialogs.append(
-                {
-                    "name": name,
-                    "unread": unread,
-                    "preview": t[:160],
-                    # последнее слово за нами? (в строке после имени идёт «Вы: …»)
-                    "last_is_ours": t.startswith(f"{name} Вы:"),
-                }
-            )
+            if t:
+                dialogs.append(classify_dialog_row(t))
             prev_avatar = False
             continue
         prev_avatar = False

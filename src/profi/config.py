@@ -197,6 +197,9 @@ LOG_LEVEL = _get("PROFI_LOG_LEVEL", "INFO")
 
 # --- Чаты в цикле воркера ---
 CHAT_CHECK_EVERY_CYCLES = int(_get("PROFI_CHAT_EVERY", "3"))
+# Сколько наших сообщений подряд без ответа клиента допустимо, прежде чем
+# диалог замолкает (инцидент 04.09 «8 догонялок Алисе»).
+CHAT_MAX_CONSECUTIVE_OURS = int(_get("PROFI_CHAT_MAX_OURS", "2"))
 
 # --- Кандидаты и детали ---
 # Default-on: свежий заказ проходит details -> decision -> send в той же вкладке.

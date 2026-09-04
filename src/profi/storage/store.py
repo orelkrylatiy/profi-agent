@@ -361,10 +361,10 @@ class Store:
     def log_chat(self, order_id: str | None, client_name: str, sender: str, text: str) -> None:
         """Persist chat event and infer first client reply from auto-chat handling.
 
-        Runtime only writes tutor/system chat events after opening an unread dialog
-        whose last message is the client's. Therefore the first such event after a
-        confirmed outreach is also a privacy-preserving reply observation: timestamp
-        only, no incoming client text is copied into candidates.
+        Runtime writes tutor/system events and (since the nudge fix, 04.09)
+        the client message being replied to. Only tutor/system events count as
+        a reply observation: timestamp only, no incoming client text is copied
+        into candidates.
         """
         now = int(time.time())
         self.conn.execute(
@@ -386,6 +386,25 @@ class Store:
             (order_id,),
         ).fetchone()
         return row[0] if row and row[0] else None
+
+    def chat_tutor_streak(self, order_id: str) -> int:
+        """Сколько последних наших сообщений в диалоге подряд без ответа клиента.
+
+        Защита от «догонялок» (инцидент 04.09: 8 сообщений молчащему клиенту):
+        если streak >= лимита — клиент молчит после N наших сообщений, молчим и мы.
+        """
+        rows = self.conn.execute(
+            "SELECT sender FROM chat_log "
+            "WHERE order_id = ? AND sender IN ('tutor', 'client') "
+            "ORDER BY created_at DESC, id DESC LIMIT 20",
+            (order_id,),
+        ).fetchall()
+        streak = 0
+        for (sender,) in rows:
+            if sender != "tutor":
+                break
+            streak += 1
+        return streak
 
     def set_note(self, order_id: str, note: str) -> bool:
         """Internal decision/debug note; not the primary outreach analytics field."""
