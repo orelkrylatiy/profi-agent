@@ -93,9 +93,7 @@ PROFILE = load_profile(PROFILE_NAME, PROFILE_DIR) if PROFILE_NAME else None
 # Старые переменные остаются override'ами для плавной миграции account env.
 PERSONA = _get("PROFI_PERSONA", PROFILE.persona if PROFILE else _legacy_persona)
 PERSONA_DIR = PROJECT_DIR / "personas"
-_subjects_default = (
-    ",".join(PROFILE.subject_keywords) if PROFILE else "информатик,программирован"
-)
+_subjects_default = ",".join(PROFILE.subject_keywords) if PROFILE else "информатик,программирован"
 SUBJECT_KEYWORDS = [
     s.strip() for s in _get("PROFI_SUBJECTS", _subjects_default).split(",") if s.strip()
 ]
@@ -153,9 +151,7 @@ BARTER_PATTERNS = [
     "бесплатн",
 ]
 STOP_PATTERNS = [
-    s.strip().lower()
-    for s in _get("PROFI_STOP_PATTERNS", _stop_default).split(",")
-    if s.strip()
+    s.strip().lower() for s in _get("PROFI_STOP_PATTERNS", _stop_default).split(",") if s.strip()
 ]
 REMOTE_ONLY = PROFILE.remote_only if PROFILE else True
 
