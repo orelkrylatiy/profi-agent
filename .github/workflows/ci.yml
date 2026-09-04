@@ -32,3 +32,18 @@ jobs:
 
       - name: Ruff format check
         run: uv run ruff format --check .
+
+  windows-supervisor:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Windows supervisor tests
+        run: uv run pytest -q tests/test_windows_supervisor.py
