@@ -42,9 +42,6 @@ jobs:
 
           store = Path("src/profi/storage/store.py")
           text = store.read_text(encoding="utf-8")
-
-          # Stale unknown belongs to the original send attempt for business-day
-          # attribution, not to the later process restart that reconciled it.
           text = text.replace(
               "send_status='unknown', sent_at=COALESCE(sent_at, ?), ",
               "send_status='unknown', sent_at=COALESCE(sent_at, send_started_at, ?), ",
@@ -53,7 +50,7 @@ jobs:
           view_start = text.index("DROP VIEW IF EXISTS v_prompt_experiments;")
           view_end_marker = "GROUP BY prompt_experiment, prompt_variant;\n"
           view_end = text.index(view_end_marker, view_start) + len(view_end_marker)
-          new_view = '''DROP VIEW IF EXISTS v_prompt_experiments;
+          new_view = """DROP VIEW IF EXISTS v_prompt_experiments;
           CREATE VIEW v_prompt_experiments AS
           SELECT
               prompt_experiment,
@@ -120,24 +117,25 @@ jobs:
           FROM candidates
           WHERE prompt_experiment IS NOT NULL AND prompt_variant IS NOT NULL
           GROUP BY prompt_experiment, prompt_variant;
-          '''
+          """
           text = text[:view_start] + new_view + text[view_end:]
 
           sends_start = text.index("    def sends_today(")
           sends_end = text.index("    def ensure_candidate(", sends_start)
-          new_sends = '''    def sends_today(self, now=None) -> int:
-              from profi.utils.workhours import business_now
-
-              current = business_now(now)
-              midnight = current.replace(hour=0, minute=0, second=0, microsecond=0)
-              row = self.conn.execute(
-                  "SELECT COUNT(*) FROM candidates WHERE send_status IN ('sent','unknown') "
-                  "AND sent_at >= ?",
-                  (int(midnight.timestamp()),),
-              ).fetchone()
-              return int(row[0])
-
-          '''
+          new_sends = (
+              "    def sends_today(self, now=None) -> int:\n"
+              "        from profi.utils.workhours import business_now\n"
+              "\n"
+              "        current = business_now(now)\n"
+              "        midnight = current.replace(hour=0, minute=0, second=0, microsecond=0)\n"
+              "        row = self.conn.execute(\n"
+              "            \"SELECT COUNT(*) FROM candidates WHERE send_status IN ('sent','unknown') \"\n"
+              "            \"AND sent_at >= ?\",\n"
+              "            (int(midnight.timestamp()),),\n"
+              "        ).fetchone()\n"
+              "        return int(row[0])\n"
+              "\n"
+          )
           text = text[:sends_start] + new_sends + text[sends_end:]
           store.write_text(text, encoding="utf-8")
 
