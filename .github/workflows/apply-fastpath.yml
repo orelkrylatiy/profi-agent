@@ -1,0 +1,31 @@
+name: Apply fast-path patch
+
+on:
+  push:
+    branches: [feature/fast-path-fallback-20260904]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply narrow integration patch
+        run: python tools/apply_fastpath_patch.py
+
+      - name: Commit generated main.py
+        run: |
+          if git diff --quiet -- src/profi/main.py; then
+            echo "main.py already patched"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/profi/main.py
+          git commit -m "feat: wire fresh orders into same-page fast path"
+          git push
