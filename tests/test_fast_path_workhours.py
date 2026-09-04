@@ -13,6 +13,10 @@ class _Store:
     def sends_today(self):
         return 0
 
+    def assign_prompt_variant(self, order_id, experiment_id, variants):
+        self.calls.append(("prompt", experiment_id, "A"))
+        return "A"
+
     def set_draft(self, order_id, status, text=None, source=None, error=None):
         self.calls.append(("draft", status))
         return True
@@ -69,6 +73,7 @@ def test_outside_work_hours_skips_before_llm(monkeypatch):
 
     assert result == "skipped"
     assert store.status == "skipped"
+    assert not any(call[0] == "prompt" for call in store.calls)
 
 
 def test_work_hours_rechecked_immediately_before_click(monkeypatch):
@@ -104,4 +109,5 @@ def test_work_hours_rechecked_immediately_before_click(monkeypatch):
 
     assert result == "skipped"
     assert store.status == "skipped"
+    assert ("prompt", "outreach_offer_v1", "A") in store.calls
     assert not any(call[0] == "response" for call in store.calls)

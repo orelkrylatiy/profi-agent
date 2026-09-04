@@ -2,8 +2,7 @@
 
 The worker owns the fresh order page. This module never opens an order itself, so
 happy-path processing is one open -> one decision -> one send -> one close.
-SQLite remains the durable state/idempotency layer; no background retry is needed
-for candidates that reached this flow.
+SQLite remains the durable state/idempotency and experiment layer.
 """
 
 from __future__ import annotations
@@ -14,6 +13,11 @@ from dataclasses import dataclass
 
 from profi import config
 from profi import llm as llm_mod
+from profi.copy_style import (
+    OUTREACH_EXPERIMENT_ID,
+    OUTREACH_VARIANT_IDS,
+    outreach_variant_prompt,
+)
 from profi.integration import respond as respond_mod
 from profi.utils import has_contacts, in_work_hours
 
@@ -111,12 +115,7 @@ def decide_reply(
     llm_blocked: bool = False,
     on_limit: Callable[[Exception], None] | None = None,
 ) -> Decision:
-    """Rules -> LLM when available -> safe profile fallback on LLM failure.
-
-    A semantic LLM `skip` is terminal and never replaced with a template. Fallback
-    is only a resilience path when the model is unavailable/invalid, after all
-    deterministic gates have already passed.
-    """
+    """Rules -> LLM when available -> safe profile fallback on LLM failure."""
     gate = full_gate_reason(details)
     if gate:
         return Decision("skip", gate, None, "rules")
@@ -224,8 +223,9 @@ def process_open_candidate(
 ) -> str:
     """Finish a fresh candidate using the already-open order page.
 
-    The page lifecycle belongs to the caller and is never closed here. Every
-    normal outcome is terminal for this candidate: sent/unknown/skipped/failed.
+    Before generation the candidate receives one persisted A/B/C prompt arm.
+    The exact arm survives model retries and process restarts. Fallback sends are
+    still tagged with the arm, but experiment statistics exclude fallback source.
     """
     if not in_work_hours():
         return _terminal(
@@ -245,10 +245,18 @@ def process_open_candidate(
             note="скип: дневной лимит отправок исчерпан",
         )
 
+    variant = store.assign_prompt_variant(
+        order_id,
+        OUTREACH_EXPERIMENT_ID,
+        OUTREACH_VARIANT_IDS,
+    )
+    base_system = system_prompt_factory()
+    experiment_system = base_system + outreach_variant_prompt(variant)
+
     decision = decide_reply(
         details,
         order_id,
-        system_prompt_factory=system_prompt_factory,
+        system_prompt_factory=lambda: experiment_system,
         user_prompt=user_prompt,
         llm_blocked=llm_blocked,
         on_limit=on_limit,
@@ -300,8 +308,6 @@ def process_open_candidate(
         store.set_note(order_id, f"скип: {why}")
         return "skipped"
 
-    # Work-hours and account-wide daily gates are rechecked immediately before
-    # the irreversible click: a 22:59 cycle must not send after the window closes.
     if not in_work_hours():
         store.set_send_status(order_id, "skipped")
         store.set_note(order_id, "скип: рабочее окно завершилось перед отправкой")
@@ -319,8 +325,6 @@ def process_open_candidate(
             rate=None if config.RESPOND_MODE == "commission" else config.RATE,
         )
     except Exception as exc:
-        # click_send уже начал необратимую операцию: при потере связи нельзя
-        # утверждать, что отправки не было. unknown terminal предотвращает retry.
         store.set_send_status(order_id, "unknown")
         store.record_response(order_id, config.RESPOND_MODE, due)
         store.set_note(order_id, f"fast-path click outcome unknown: {str(exc)[:180]}")
@@ -339,6 +343,6 @@ def process_open_candidate(
         store.record_response(order_id, config.RESPOND_MODE, due)
     store.set_note(
         order_id,
-        f"{decision.reason} | source={decision.source} | send={status}",
+        f"{decision.reason} | source={decision.source} | prompt={variant} | send={status}",
     )
     return status

@@ -274,6 +274,10 @@ class _FakeStore:
     def sends_today(self):
         return self.sent_today
 
+    def assign_prompt_variant(self, order_id, experiment_id, variants):
+        self.calls.append(("prompt", experiment_id, "A"))
+        return "A"
+
     def set_draft(self, order_id, status, text=None, source=None, error=None):
         self.calls.append(("draft", status, text, source, error))
 
@@ -342,6 +346,7 @@ class TestProcessOpenCandidate:
 
         assert status == "sent"
         assert opened == [page]
+        assert ("prompt", "outreach_offer_v1", "A") in store.calls
         assert ("draft", "generated", "Т" * 150, "fallback", None) in store.calls
         assert ("response", "pay", 200) in store.calls
 
