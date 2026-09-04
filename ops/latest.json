@@ -89,14 +89,14 @@
     },
     "profi3": {
       "candidates": {
-        "created": 2,
+        "created": 5,
         "current_details_errors": 0,
         "current_draft_errors": 0,
         "current_send_status": {
           "failed": 1,
-          "skipped": 1
+          "skipped": 4
         },
-        "details_ready": 2,
+        "details_ready": 5,
         "drafts_generated": 1
       },
       "chat": {
@@ -107,11 +107,11 @@
       },
       "db_read_error": false,
       "feed": {
-        "new_orders": 37,
-        "orders_seen": 37
+        "new_orders": 44,
+        "orders_seen": 44
       },
       "log_events": {
-        "feed_capture_error": 1,
+        "feed_capture_error": 2,
         "traceback": 3
       },
       "responses": {
@@ -123,25 +123,25 @@
       }
     }
   },
-  "code_revision": "f3587528eb0d",
+  "code_revision": "5183285fe79e",
   "date": "2026-09-04",
-  "generated_at": "2026-09-04T21:55:20+05:00",
+  "generated_at": "2026-09-04T22:11:36+05:00",
   "logs": {
     "events": {
       "auth_required": 1,
       "browser_offline": 47,
       "cdp_reconnect": 34,
-      "feed_capture_error": 7,
+      "feed_capture_error": 8,
       "order_open_fail": 149,
       "tab_hygiene": 81,
       "traceback": 9
     },
     "files_scanned": 18,
     "levels": {
-      "error": 38,
+      "error": 39,
       "warning": 352
     },
-    "lines_for_day": 6647
+    "lines_for_day": 6729
   },
   "privacy": {
     "aggregate_only": true,
@@ -155,13 +155,13 @@
   "schema_version": 1,
   "timezone": "Asia/Yekaterinburg",
   "totals": {
-    "candidates_created": 290,
+    "candidates_created": 293,
     "chat_replies": 13,
     "needs_human": 5,
-    "new_orders": 436,
+    "new_orders": 443,
     "recorded_paid_rub": 0,
     "responses_sent": 25,
     "responses_unknown": 2,
-    "technical_error_events": 328
+    "technical_error_events": 329
   }
 }

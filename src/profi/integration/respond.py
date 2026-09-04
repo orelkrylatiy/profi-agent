@@ -141,7 +141,11 @@ def _select_commission_in_modal(cont) -> None:
             "в модалке тарифа нет опции «Комиссия» — доступен только платный отклик"
         )
     lock = modal.query_selector('[data-testid*="tariffs/lockIcon"]')
-    if lock or COMMISSION_LIMIT_RE.search(modal.inner_text(timeout=3_000) or ""):
+    try:
+        modal_text = modal.inner_text() or ""
+    except Exception:
+        modal_text = ""
+    if lock or COMMISSION_LIMIT_RE.search(modal_text):
         raise CommissionExhaustedError(
             "тариф «Комиссия» заблокирован: дневной лимит profi исчерпан"
             " («Подождите до завтра»)"
