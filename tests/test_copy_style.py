@@ -18,9 +18,8 @@ def _raw(**payload) -> str:
 class TestClientCopyIssues:
     def test_compact_direct_message_passes(self):
         text = (
-            "Здравствуйте! Работаю только онлайн. Если формат подходит, можно "
-            "начать с пробного занятия и после него решить, на что сделать упор. "
-            "Когда вам удобнее?"
+            "Здравствуйте! Могу помочь с подготовкой. Предлагаю начать с пробного "
+            "занятия и после него решить, на чём сделать упор. Когда вам удобнее?"
         )
         assert client_copy_issues(text, channel="outreach") == []
 
@@ -43,13 +42,16 @@ class TestClientCopyIssues:
         )
         assert any("слишком длинно" in issue for issue in client_copy_issues(text))
 
-    def test_style_retry_preserves_facts_instruction(self):
+    def test_style_retry_preserves_facts_and_asks_for_concrete_offer(self):
         hint = style_retry_instruction(["слишком длинно", "больше одного вопроса"])
         assert "ничего нового не придумывай" in hint
+        assert "конкретный оффер" in hint
+        assert "глубокая персонализация не нужна" in hint.lower()
         assert "максимум один вопрос" in hint
 
-    def test_overrides_focus_on_function_not_fake_typos(self):
-        assert "мини-презентацию" in OUTREACH_STYLE_OVERRIDE
+    def test_overrides_prefer_offer_over_deep_personalization(self):
+        assert "конкретно предложи помощь" in OUTREACH_STYLE_OVERRIDE.lower()
+        assert "персонализация необязательна" in OUTREACH_STYLE_OVERRIDE.lower()
         assert "не добавляй нарочно опечатки" in OUTREACH_STYLE_OVERRIDE.lower()
         assert "последний прямой вопрос" in CHAT_STYLE_OVERRIDE
 
@@ -70,9 +72,9 @@ class TestClientCopyMiddleware:
             verdict="send",
             reason="подходит",
             text=(
-                "Здравствуйте! Могу помочь с подготовкой. На первом занятии "
-                "посмотрим, что уже получается, и решим, с чего начать. "
-                "Когда вам удобно попробовать?"
+                "Здравствуйте! Могу помочь с подготовкой. Предлагаю начать с "
+                "пробного занятия и после него решить, на чём сделать упор. "
+                "Когда вам удобно?"
             ),
         )
         answers = iter([first, second])
