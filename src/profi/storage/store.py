@@ -177,6 +177,7 @@ class Store:
 
         self.conn.executescript(VIEW_SCHEMA)
         self.conn.commit()
+        self.reconcile_stale_sending()
 
     def close(self):
         self.conn.close()

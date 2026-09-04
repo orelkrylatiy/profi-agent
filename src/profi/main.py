@@ -434,7 +434,7 @@ def run_respond(order_id: str, rate: int, text: str, send: bool) -> int:
         if ok:
             status = "sent"
         elif respond_mod.send_failed(outcome):
-            status = "fail"  # площадка показала ошибку — отправки и списания не было
+            status = "failed"  # площадка показала ошибку — отправки и списания не было
         else:
             status = "unknown"
         store.set_send_status(order_id, status)
