@@ -22,7 +22,8 @@ def test_start_win_is_idempotent_and_starts_single_account_supervisor():
     assert "supervise-win.ps1" in text
     assert "Get-CimInstance Win32_Process" in text
     assert "already" in text.lower() or "уже" in text.lower()
-    assert "profi-loop-" not in text
+    assert "run-autopilot-win.ps1" not in text
+    assert "while ($true)" not in text
 
 
 def test_supervisor_owns_browser_lifecycle_but_worker_keeps_no_launch():
