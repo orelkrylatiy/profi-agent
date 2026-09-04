@@ -118,19 +118,25 @@ def test_autopilot_runner_is_legacy_loop_with_account_env():
     assert "Start-Sleep -Seconds 120" in text
 
 
-def test_powershell_scripts_parse_when_pwsh_is_available():
-    pwsh = shutil.which("pwsh")
-    if pwsh is None:
+def test_powershell_scripts_parse_in_all_available_shells():
+    shells = []
+    for name in ("powershell", "pwsh"):
+        resolved = shutil.which(name)
+        if resolved and resolved not in shells:
+            shells.append(resolved)
+    if not shells:
         return
-    for path in (START, STOP, SUPERVISOR, WORKER, AUTOPILOT):
-        command = (
-            "$tokens=$null; $errors=$null; "
-            f"[System.Management.Automation.Language.Parser]::ParseFile('{path.as_posix()}',"
-            "[ref]$tokens,[ref]$errors) > $null; "
-            "if ($errors.Count -gt 0) { $errors | ForEach-Object { Write-Error $_ }; exit 1 }"
-        )
-        subprocess.run(
-            [pwsh, "-NoProfile", "-NonInteractive", "-Command", command],
-            check=True,
-            cwd=ROOT,
-        )
+
+    for shell in shells:
+        for path in (START, STOP, SUPERVISOR, WORKER, AUTOPILOT):
+            command = (
+                "$tokens=$null; $errors=$null; "
+                f"[System.Management.Automation.Language.Parser]::ParseFile('{path.as_posix()}',"
+                "[ref]$tokens,[ref]$errors) > $null; "
+                "if ($errors.Count -gt 0) { $errors | ForEach-Object { Write-Error $_ }; exit 1 }"
+            )
+            subprocess.run(
+                [shell, "-NoProfile", "-NonInteractive", "-Command", command],
+                check=True,
+                cwd=ROOT,
+            )
