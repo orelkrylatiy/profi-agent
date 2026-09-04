@@ -95,6 +95,33 @@ def test_chat_retry_has_no_outreach_experiment_language():
     assert "needs_human=false" in hint
 
 
+def test_legacy_schedule_and_handoff_rules_do_not_reach_provider(monkeypatch):
+    calls = []
+
+    def fake_chat(system, user, temperature, max_tokens, model):
+        calls.append(system)
+        return json.dumps(
+            {"reply": "Когда вам удобно провести пробное занятие?", "needs_human": False},
+            ensure_ascii=False,
+        )
+
+    monkeypatch.setattr(llm, "_chat", fake_chat)
+    legacy = (
+        "ЦЕЛЬ переписки — договориться на пробное занятие. "
+        "Предложи 2–3 конкретных окна времени (с учётом текущего времени) или "
+        "спроси удобное; мягко веди диалог к пробному занятию. "
+        "Если клиент торгуется по цене, требует гарантий/возвратов, жалуется "
+        "или тема вне обучения — ставь needs_human=true и reply оставь пустым. "
+    )
+    llm.chat(legacy, "dialog", model="fake")
+
+    assert len(calls) == 1
+    assert "Предложи 2–3 конкретных окна" not in calls[0]
+    assert "ставь needs_human=true" not in calls[0]
+    assert "НЕ ПРИДУМЫВАЙ свободные окна" in calls[0]
+    assert "needs_human=false" in calls[0]
+
+
 def test_chat_middleware_retries_handoff_and_forces_false(monkeypatch):
     answers = iter(
         [
