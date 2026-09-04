@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from profi import config
 from profi import llm as llm_mod
 from profi.integration import respond as respond_mod
-from profi.utils import has_contacts
+from profi.utils import has_contacts, in_work_hours
 
 
 @dataclass(frozen=True)
@@ -227,6 +227,15 @@ def process_open_candidate(
     The page lifecycle belongs to the caller and is never closed here. Every
     normal outcome is terminal for this candidate: sent/unknown/skipped/failed.
     """
+    if not in_work_hours():
+        return _terminal(
+            store,
+            order_id,
+            send_status="skipped",
+            draft_status="skipped",
+            note="скип: вне рабочих часов",
+        )
+
     if config.DAILY_SEND_LIMIT and store.sends_today() >= config.DAILY_SEND_LIMIT:
         return _terminal(
             store,
@@ -291,7 +300,13 @@ def process_open_candidate(
         store.set_note(order_id, f"скип: {why}")
         return "skipped"
 
-    # Recheck the account-wide daily gate immediately before the irreversible click.
+    # Work-hours and account-wide daily gates are rechecked immediately before
+    # the irreversible click: a 22:59 cycle must not send after the window closes.
+    if not in_work_hours():
+        store.set_send_status(order_id, "skipped")
+        store.set_note(order_id, "скип: рабочее окно завершилось перед отправкой")
+        return "skipped"
+
     if config.DAILY_SEND_LIMIT and store.sends_today() >= config.DAILY_SEND_LIMIT:
         store.set_send_status(order_id, "skipped")
         store.set_note(order_id, "скип: дневной лимит достигнут перед отправкой")

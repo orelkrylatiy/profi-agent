@@ -20,6 +20,13 @@ from profi.integration.orders import OrderOpenError
 from profi.storage import Store
 
 
+@pytest.fixture(autouse=True)
+def _fastpath_inside_work_hours(monkeypatch):
+    import profi.fastpath as fastpath
+
+    monkeypatch.setattr(fastpath, "in_work_hours", lambda: True)
+
+
 def _details(**overrides):
     base = {
         "id": "93400001",

@@ -6,10 +6,20 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 import profi.main as main
 from profi.fastpath import Decision, normalize_reply_text, process_open_candidate
 from profi.profiles import load_profile
 from profi.storage import Store
+
+
+@pytest.fixture(autouse=True)
+def _fastpath_inside_work_hours(monkeypatch):
+    import profi.fastpath as fastpath
+
+    monkeypatch.setattr(fastpath, "in_work_hours", lambda: True)
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
