@@ -406,6 +406,21 @@ class Store:
             streak += 1
         return streak
 
+    def chat_last_events_by_name(
+        self, client_name: str, n: int = 3
+    ) -> list[tuple[str, str, int]]:
+        """Последние n событий диалога (новые сверху): (sender, text, created_at).
+
+        Ищем по client_name, а не order_id: фильтр целей в chat-auto работает
+        ДО открытия диалога, order_id в этот момент ещё неизвестен.
+        """
+        rows = self.conn.execute(
+            "SELECT sender, text, created_at FROM chat_log "
+            "WHERE client_name = ? ORDER BY created_at DESC, id DESC LIMIT ?",
+            (client_name, n),
+        ).fetchall()
+        return [(r["sender"], r["text"] or "", int(r["created_at"])) for r in rows]
+
     def set_note(self, order_id: str, note: str) -> bool:
         """Internal decision/debug note; not the primary outreach analytics field."""
         cur = self.conn.execute(

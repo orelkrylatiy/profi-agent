@@ -844,6 +844,46 @@ CHAT_SYSTEM = (
 )
 
 
+# Сколько времени ретраим «потерянные» сообщения клиента (ответ не ушёл или
+# не был дан) — дальше окно закрывается, чтобы не жечь LLM на мёртвом диалоге.
+_CHAT_RETRY_WINDOW_S = 2 * 60 * 60
+
+
+def _chat_target(store: Store, d: dict) -> bool:
+    """Кому отвечаем: последнее сообщение — от клиента И мы на него ещё не
+    ответили успешно.
+
+    unread — подсказка площадки, но счётчик поднимается не всегда (инцидент
+    05.09 «Усмонали»: клиент написал «Ты в каком городе», наша отправка упала
+    SEND_FAILED, счётчик остался 0 — диалог навсегда выпадал из таргетинга
+    по фильтру «unread > 0»). Поэтому если chat_log говорит «после
+    последнего сообщения клиента tutor-ответа не было» — ретраим, даже когда
+    unread == 0.
+    """
+    if d.get("who_last") != "client":
+        return False
+    ev = store.chat_last_events_by_name(d["name"])
+    last_sender = ev[0][0] if ev else ""
+    last_text = ev[0][1] if ev else ""
+    recent = bool(ev) and (time.time() - ev[0][2]) < _CHAT_RETRY_WINDOW_S
+    # Решение по последнему сообщению уже принято (NEEDS_HUMAN / NUDGE_LIMIT /
+    # INJECTION_GUARD) — не переигрываем его; SEND_FAILED — не решение, а сбой.
+    decided = last_sender == "system" and not last_text.startswith("SEND_FAILED")
+    if d["unread"] > 0:
+        return not decided
+    if not ev or last_sender == "client":
+        # клиент написал, нашего ответа в логе нет — ретраим в окне 2 часа
+        return recent
+    if last_sender == "system" and last_text.startswith("SEND_FAILED"):
+        # одна неудача — пробуем ещё раз; две SEND_FAILED в хвосте — сдаёмся
+        # (каждая попытка перелогирует client-ряд, поэтому считаем по хвосту)
+        fails = sum(
+            1 for s, t, _ in ev if s == "system" and t.startswith("SEND_FAILED")
+        )
+        return recent and fails < 2
+    return False
+
+
 def _chat_page():
     """Лёгкое подключение: чаты живут в СВОЕЙ вкладке, feed-вкладку воркера
     не трогаем → конфликтов с мониторингом нет; сериализация только с
@@ -915,13 +955,13 @@ def run_chat_auto(ctx=None) -> int:
             pw, browser, page = _chat_page()
         chat_mod.open_chats(page)
         dialogs = chat_mod.list_dialogs(page)
-        # Отвечаем ТОЛЬКО если: (а) есть непрочитанные И (б) последнее
-        # сообщение ИМЕННО ОТ КЛИЕНТА. «Вы:» — наше, молчим; «Робот:» —
-        # системное (площадка шлёт его и после наших сообщений — инцидент
-        # 04.09 «8 догонялок Алисе»: старый парсер считал такой диалог
-        # «клиент написал» и писал снова).
-        targets = [d for d in dialogs if d["unread"] > 0 and d.get("who_last") == "client"][:2]
-        print(f"диалогов: {len(dialogs)}, с непрочитанными: {len(targets)}")
+        # Отвечаем ТОЛЬКО если последнее сообщение ИМЕННО ОТ КЛИЕНТА и мы на
+        # него ещё не ответили (детали в _chat_target). «Вы:» — наше, молчим;
+        # «Робот:» — системное (площадка шлёт его и после наших сообщений —
+        # инцидент 04.09 «8 догонялок Алисе»); непрочитанные не обязательны —
+        # счётчик площадки иногда не поднимается (инцидент 05.09 «Усмонали»).
+        targets = [d for d in dialogs if _chat_target(store, d)][:2]
+        print(f"диалогов: {len(dialogs)}, целей для ответа: {len(targets)}")
         for d in targets:
             try:
                 order_id = chat_mod.open_dialog_by_name(page, d["name"])
