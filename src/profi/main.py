@@ -257,8 +257,7 @@ def run_loop(max_cycles: int | None = None) -> int:
                 # тарифа, инцидент lang 04.09): по решению владельца аккаунт
                 # целиком встаёт до завтра — LLM не тратим, ленту не дёргаем.
                 log.info(
-                    "комиссия на сегодня исчерпана — аккаунт приостановлен "
-                    "(проверка раз в 10 мин)"
+                    "комиссия на сегодня исчерпана — аккаунт приостановлен (проверка раз в 10 мин)"
                 )
                 time.sleep(10 * 60)
                 continue
@@ -435,7 +434,7 @@ def run_respond(order_id: str, rate: int, text: str, send: bool) -> int:
         if ok:
             status = "sent"
         elif respond_mod.send_failed(outcome):
-            status = "fail"  # площадка показала ошибку — отправки и списания не было
+            status = "failed"  # площадка показала ошибку — отправки и списания не было
         else:
             status = "unknown"
         store.set_send_status(order_id, status)
