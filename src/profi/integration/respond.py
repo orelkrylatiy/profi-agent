@@ -30,9 +30,7 @@ COMMISSION_RE = re.compile("комисси", re.IGNORECASE)
 # orderCard/tariffs/lockIcon) и текст «не больше 20 раз в день. Подождите до
 # завтра» (инцидент 04.09: lang упёрся в лимит в 13:59 и молотил скипами
 # «к оплате N ₽» до полуночи).
-COMMISSION_LIMIT_RE = re.compile(
-    r"не больше\s*\d+\s*раз в день|подождите до завтра", re.IGNORECASE
-)
+COMMISSION_LIMIT_RE = re.compile(r"не больше\s*\d+\s*раз в день|подождите до завтра", re.IGNORECASE)
 # страница после клика показывает это при отказе RPC (инцидент #92799459, rpc 400)
 SEND_ERROR_MARKER = "произошла ошибка"
 
@@ -147,8 +145,7 @@ def _select_commission_in_modal(cont) -> None:
         modal_text = ""
     if lock or COMMISSION_LIMIT_RE.search(modal_text):
         raise CommissionExhaustedError(
-            "тариф «Комиссия» заблокирован: дневной лимит profi исчерпан"
-            " («Подождите до завтра»)"
+            "тариф «Комиссия» заблокирован: дневной лимит profi исчерпан («Подождите до завтра»)"
         )
     cands = modal.query_selector_all("xpath=.//*[normalize-space(.)='Комиссия']")
     if not cands:
@@ -205,8 +202,7 @@ def select_tariff(order_page: Page, mode: str) -> None:
     txt = block.first.inner_text(timeout=5_000)
     if COMMISSION_LIMIT_RE.search(txt):
         raise CommissionExhaustedError(
-            "тариф «Комиссия» заблокирован: дневной лимит profi исчерпан"
-            " («Подождите до завтра»)"
+            "тариф «Комиссия» заблокирован: дневной лимит profi исчерпан («Подождите до завтра»)"
         )
     if not COMMISSION_RE.search(txt):
         raise RespondError(
