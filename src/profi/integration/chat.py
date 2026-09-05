@@ -18,7 +18,44 @@ from profi.utils.pacing import human_pause, type_human
 log = logging.getLogger("profi.chat")
 
 
+# Ширина, ниже которой чат-виджет profi включает мобильный режим
+# (layout.isMobile → lineBreakOnEnter → Enter НЕ отправляет, а вставляет
+# перенос строки; инцидент 05.09 «Усмонали»: окно 767px при брейкпоинте 768
+# — сообщения не уходили вообще). С запасом: 900.
+MIN_DESKTOP_WIDTH = 900
+
+
+def ensure_desktop_width(page: Page) -> None:
+    """Расширить окно браузера, если оно уже мобильного брейкпоинта.
+
+    Это управление окном через CDP, не инжект в страницу (RULES.md §1
+    про isTrusted-инпуты не про это). Без этого на узком окне чат
+    молча перестаёт отправлять: Enter превращается в перенос строки.
+    """
+    try:
+        if page.evaluate("window.innerWidth") >= MIN_DESKTOP_WIDTH:
+            return
+        session = page.context.new_cdp_session(page)
+        try:
+            wins = session.send("Browser.getWindowForTarget")
+            session.send(
+                "Browser.setWindowBounds",
+                {"windowId": wins["windowId"], "bounds": {"width": 1100, "height": 850}},
+            )
+        finally:
+            session.detach()
+        page.wait_for_timeout(500)
+        log.warning(
+            "окно %spx уже мобильного брейкпоинта — расширил до 1100 "
+            "(в мобильном режиме виджета Enter не отправляет сообщения)",
+            page.evaluate("window.innerWidth"),
+        )
+    except Exception:
+        log.warning("ensure_desktop_width: не смог проверить/расширить окно", exc_info=True)
+
+
 def open_chats(page: Page) -> None:
+    ensure_desktop_width(page)
     page.goto("https://profi.ru/backoffice/r.php", wait_until="domcontentloaded", timeout=45_000)
     page.wait_for_timeout(3500)
 
@@ -163,8 +200,15 @@ def send_reply(page: Page, text: str) -> bool:
                 break
 
     try:
-        if _box_value(box).strip():
-            log.error("send_reply: текст остался в поле — отправка не подтвердилась")
+        leftover = _box_value(box)
+        if leftover.strip():
+            hint = ""
+            # Сигнатура мобильного режима виджета (lineBreakOnEnter): Enter
+            # вставил перенос вместо отправки — текст совпадает с введённым
+            # плюс хвостовой перенос строки (инцидент 05.09 «Усмонали», 767px).
+            if leftover.rstrip("\n") == text.rstrip() and len(leftover) > len(text.rstrip()):
+                hint = " (Enter вставил перенос — мобильный режим виджета, узкое окно?)"
+            log.error("send_reply: текст остался в поле — отправка не подтвердилась%s", hint)
             return False
     except Exception:
         log.warning("send_reply: финальная проверка поля упала — fail closed")

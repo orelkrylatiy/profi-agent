@@ -1033,6 +1033,9 @@ def run_chat_auto(ctx=None) -> int:
                 if len(reply) > 800:
                     cut = max(reply.rfind(c, 0, 800) for c in ".!?")
                     reply = reply[: cut + 1] if cut > 50 else reply[:800]
+                # Однострочный текст: \\n в keyboard.type превращается в нажатие
+                # Enter — ответ уехал бы кусками, а в поле остался бы хвост.
+                reply = " ".join(reply.split())
                 if not chat_mod.send_reply(page, reply):
                     store.log_chat(
                         order_id, d["name"], "system", "SEND_FAILED: текст остался в поле"

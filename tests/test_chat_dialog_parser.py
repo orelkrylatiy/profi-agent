@@ -6,9 +6,58 @@
 
 import time
 
-from profi.integration.chat import classify_dialog_row
+from profi.integration.chat import classify_dialog_row, ensure_desktop_width
 from profi.main import _chat_target
 from profi.storage.store import Store
+
+
+# --- ensure_desktop_width: узкое окно = мобильный режим виджета (05.09) ---
+
+class _FakeSession:
+    def __init__(self):
+        self.sent = []
+
+    def send(self, method, params=None):
+        self.sent.append((method, params))
+        if method == "Browser.getWindowForTarget":
+            return {"windowId": 42, "bounds": {}}
+        return {}
+
+
+class _FakeContext:
+    def __init__(self):
+        self.session = _FakeSession()
+
+    def new_cdp_session(self, page):
+        return self.session
+
+
+class _FakePage:
+    def __init__(self, inner_width):
+        self._w = inner_width
+        self.context = _FakeContext()
+        self.waits = 0
+
+    def evaluate(self, _expr):
+        return self._w
+
+    def wait_for_timeout(self, _ms):
+        self.waits += 1
+
+
+def test_narrow_window_gets_resized():
+    page = _FakePage(767)
+    ensure_desktop_width(page)
+    methods = [m for m, _ in page.context.session.sent]
+    assert "Browser.setWindowBounds" in methods
+    bounds = dict(page.context.session.sent)["Browser.setWindowBounds"]["bounds"]
+    assert bounds["width"] >= 900
+
+
+def test_wide_window_left_alone():
+    page = _FakePage(1087)
+    ensure_desktop_width(page)
+    assert page.context.session.sent == []
 
 
 # --- classify_dialog_row: живые форматы строк ---
