@@ -45,9 +45,7 @@ def commission_paused() -> bool:
 def mark_commission_exhausted() -> None:
     """Зафиксировать дату исчерпания — аккаунт стоит до конца дня (Макс, 04.09)."""
     try:
-        config.COMMISSION_EXHAUSTED_FILE.write_text(
-            date.today().isoformat(), encoding="utf-8"
-        )
+        config.COMMISSION_EXHAUSTED_FILE.write_text(date.today().isoformat(), encoding="utf-8")
     except OSError:
         pass
 
