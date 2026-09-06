@@ -282,6 +282,44 @@ def process_open_candidate(
         OUTREACH_EXPERIMENT_ID,
         OUTREACH_VARIANT_IDS,
     )
+
+    # Форму открываем ДО генерации ответа: если комиссионный тариф не
+    # применился (в футере «К оплате: N ₽» при режиме комиссии), заказ всё
+    # равно уйдёт в скип — раньше мы об этом узнавали только после LLM
+    # (05.09: ~96 таких скипов в день на lang жгли генерацию впустую).
+    try:
+        respond_mod._open_respond_form_inner(order_page, config.RESPOND_MODE)
+    except respond_mod.OrderHiddenError as exc:
+        store.set_send_status(order_id, "skipped")
+        store.set_note(order_id, f"скип: заказ скрыт — {str(exc)[:160]}")
+        return "skipped"
+    except respond_mod.CommissionExhaustedError as exc:
+        mark_commission_exhausted()
+        store.set_send_status(order_id, "skipped")
+        store.set_note(order_id, f"скип: {str(exc)[:160]} — аккаунт до завтра стоит")
+        return "skipped"
+    except Exception as exc:
+        store.set_send_status(order_id, "failed")
+        store.set_note(order_id, f"fast-path form failed: {str(exc)[:180]}")
+        return "failed"
+
+    if config.RESPOND_MODE == "commission":
+        # Читаем футер сразу после открытия формы: ставку в commission не
+        # вводим, поэтому «К оплате» уже финален. Нулевого/отсутствующего
+        # to_pay не считаем проблемой — повторная проверка после fill_form.
+        try:
+            early_to_pay = respond_mod.read_footer(order_page).get("to_pay")
+        except Exception:
+            early_to_pay = None
+        if early_to_pay:
+            store.set_send_status(order_id, "skipped")
+            store.set_note(
+                order_id,
+                "скип до LLM: режим комиссии, а к оплате "
+                f"{early_to_pay} ₽ — тариф выбран неверно",
+            )
+            return "skipped"
+
     base_system = system_prompt_factory()
     experiment_system = base_system + outreach_variant_prompt(variant)
 
@@ -318,17 +356,13 @@ def process_open_candidate(
         return "already_processed"
 
     try:
-        respond_mod._open_respond_form_inner(order_page, config.RESPOND_MODE)
+        # Форма уже открыта выше (до LLM); здесь только заполняем.
         footer = respond_mod.fill_form(
             order_page,
             config.RATE,
             decision.text,
             mode=config.RESPOND_MODE,
         )
-    except respond_mod.OrderHiddenError as exc:
-        store.set_send_status(order_id, "skipped")
-        store.set_note(order_id, f"скип: заказ скрыт — {str(exc)[:160]}")
-        return "skipped"
     except respond_mod.CommissionExhaustedError as exc:
         mark_commission_exhausted()
         store.set_send_status(order_id, "skipped")

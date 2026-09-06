@@ -302,6 +302,17 @@ class _FakeStore:
 
 
 class TestProcessOpenCandidate:
+    @pytest.fixture(autouse=True)
+    def _commission_flags(self, monkeypatch, tmp_path):
+        """Комиссионные гейты не зависят от машины: файл-флаг в tmp."""
+        import profi.fastpath as fastpath
+
+        monkeypatch.setattr(fastpath, "commission_paused", lambda: False)
+        self.exhausted_marks = []
+        monkeypatch.setattr(
+            fastpath, "mark_commission_exhausted", lambda: self.exhausted_marks.append(1)
+        )
+
     def test_sends_on_the_same_page_and_records_source(self, monkeypatch):
         import profi.fastpath as fastpath
 
@@ -412,6 +423,175 @@ class TestProcessOpenCandidate:
         assert store.send_status == "unknown"
         assert any(c[0] == "response" for c in store.calls)
         assert store.claim_send("93400001") is False
+
+    def test_commission_unavailable_skips_before_llm(self, monkeypatch):
+        """05.09: комиссия не применилась (to_pay>0) — раньше скипали ПОСЛЕ
+        генерации (~96 скипов/день на lang жгли LLM). Теперь скип до LLM."""
+        import profi.fastpath as fastpath
+
+        store = _FakeStore()
+        monkeypatch.setattr(
+            fastpath,
+            "decide_reply",
+            lambda *a, **k: pytest.fail("LLM must not run when commission footer shows a price"),
+        )
+        monkeypatch.setattr(fastpath.respond_mod, "_open_respond_form_inner", lambda p, mode: p)
+        monkeypatch.setattr(
+            fastpath.respond_mod, "read_footer", lambda p: {"to_pay": 117, "footer_text": "К оплате: 117 ₽"}
+        )
+        monkeypatch.setattr(
+            fastpath.respond_mod,
+            "fill_form",
+            lambda *a, **k: pytest.fail("fill_form must not run after an early skip"),
+        )
+        monkeypatch.setattr(fastpath.config, "RESPOND_MODE", "commission")
+        monkeypatch.setattr(fastpath.config, "DAILY_SEND_LIMIT", 0)
+
+        status = process_open_candidate(
+            object(),
+            object(),
+            store,
+            "93400001",
+            _details(),
+            system_prompt_factory=lambda: "system",
+            user_prompt="order",
+        )
+        assert status == "skipped"
+        assert store.send_status == "skipped"
+        notes = [c[1] for c in store.calls if c[0] == "note"]
+        assert any("скип до LLM" in n and "117" in n for n in notes)
+        assert not any(c[0] == "draft" and c[1] == "generated" for c in store.calls)
+
+    def test_commission_available_proceeds_to_llm_and_send(self, monkeypatch):
+        """Комиссия применилась (to_pay=0) — генерация и отправка идут штатно."""
+        import profi.fastpath as fastpath
+
+        store = _FakeStore()
+        monkeypatch.setattr(
+            fastpath,
+            "decide_reply",
+            lambda *a, **k: Decision("send", "подходит", "Т" * 150, "llm"),
+        )
+        monkeypatch.setattr(fastpath.respond_mod, "_open_respond_form_inner", lambda p, mode: p)
+        monkeypatch.setattr(fastpath.respond_mod, "read_footer", lambda p: {"to_pay": 0})
+        monkeypatch.setattr(
+            fastpath.respond_mod,
+            "fill_form",
+            lambda p, rate, text, mode: {"to_pay": 0, "send_button_found": True},
+        )
+        monkeypatch.setattr(
+            fastpath.respond_mod,
+            "click_send",
+            lambda p, c, rate=None: {"url_after": "https://profi.ru/backoffice/r.php?id=93400001"},
+        )
+        monkeypatch.setattr(fastpath.respond_mod, "send_failed", lambda outcome: False)
+        monkeypatch.setattr(fastpath.config, "RESPOND_MODE", "commission")
+        monkeypatch.setattr(fastpath.config, "DAILY_SEND_LIMIT", 0)
+
+        status = process_open_candidate(
+            object(),
+            object(),
+            store,
+            "93400001",
+            _details(),
+            system_prompt_factory=lambda: "system",
+            user_prompt="order",
+        )
+        assert status == "sent"
+        assert ("response", "commission", 0) in store.calls
+
+    def test_order_hidden_at_form_open_skips_before_llm(self, monkeypatch):
+        import profi.fastpath as fastpath
+        from profi.integration.respond import OrderHiddenError
+
+        store = _FakeStore()
+
+        def boom(p, mode):
+            raise OrderHiddenError("заказ скрыт (маркер 'заказ скрыт')")
+
+        monkeypatch.setattr(fastpath.respond_mod, "_open_respond_form_inner", boom)
+        monkeypatch.setattr(
+            fastpath,
+            "decide_reply",
+            lambda *a, **k: pytest.fail("LLM must not run for a hidden order"),
+        )
+        monkeypatch.setattr(fastpath.config, "RESPOND_MODE", "commission")
+        monkeypatch.setattr(fastpath.config, "DAILY_SEND_LIMIT", 0)
+
+        status = process_open_candidate(
+            object(),
+            object(),
+            store,
+            "93400001",
+            _details(),
+            system_prompt_factory=lambda: "system",
+            user_prompt="order",
+        )
+        assert status == "skipped"
+        assert store.send_status == "skipped"
+
+    def test_commission_exhausted_at_form_open_pauses_account_before_llm(self, monkeypatch):
+        import profi.fastpath as fastpath
+        from profi.integration.respond import CommissionExhaustedError
+
+        store = _FakeStore()
+
+        def boom(p, mode):
+            raise CommissionExhaustedError("тариф «Комиссия» заблокирован")
+
+        monkeypatch.setattr(fastpath.respond_mod, "_open_respond_form_inner", boom)
+        monkeypatch.setattr(
+            fastpath,
+            "decide_reply",
+            lambda *a, **k: pytest.fail("LLM must not run when commission is exhausted"),
+        )
+        monkeypatch.setattr(fastpath.config, "RESPOND_MODE", "commission")
+        monkeypatch.setattr(fastpath.config, "DAILY_SEND_LIMIT", 0)
+
+        status = process_open_candidate(
+            object(),
+            object(),
+            store,
+            "93400001",
+            _details(),
+            system_prompt_factory=lambda: "system",
+            user_prompt="order",
+        )
+        assert status == "skipped"
+        assert self.exhausted_marks == [1]
+        notes = [c[1] for c in store.calls if c[0] == "note"]
+        assert any("до завтра стоит" in n for n in notes)
+
+    def test_form_open_failure_before_llm_is_terminal_failed(self, monkeypatch):
+        import profi.fastpath as fastpath
+
+        store = _FakeStore()
+
+        def boom(p, mode):
+            raise RuntimeError("нет ни блока тарифов, ни CTA")
+
+        monkeypatch.setattr(fastpath.respond_mod, "_open_respond_form_inner", boom)
+        monkeypatch.setattr(
+            fastpath,
+            "decide_reply",
+            lambda *a, **k: pytest.fail("LLM must not run after a form-open failure"),
+        )
+        monkeypatch.setattr(fastpath.config, "RESPOND_MODE", "pay")
+        monkeypatch.setattr(fastpath.config, "DAILY_SEND_LIMIT", 0)
+
+        status = process_open_candidate(
+            object(),
+            object(),
+            store,
+            "93400001",
+            _details(),
+            system_prompt_factory=lambda: "system",
+            user_prompt="order",
+        )
+        assert status == "failed"
+        assert store.send_status == "failed"
+        notes = [c[1] for c in store.calls if c[0] == "note"]
+        assert any("fast-path form failed" in n for n in notes)
 
 
 class TestWorkerIntegration:
