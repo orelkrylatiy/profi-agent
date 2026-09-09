@@ -168,7 +168,7 @@ REMOTE_ONLY = PROFILE.remote_only if PROFILE else True
 
 # --- Денежные предохранители ---
 MAX_RESPONSE_PRICE_RUB = int(_get("PROFI_MAX_RESPONSE_PRICE", "500"))
-DAILY_SEND_LIMIT = int(_get("PROFI_DAILY_SEND_LIMIT", "0"))
+DAILY_SEND_LIMIT = int(_get("PROFI_DAILY_SEND_LIMIT", "0"))  # 0 = без лимита (решение владельца 02.09)
 MAX_COMPETITION_POSITION = int(_get("PROFI_MAX_POSITION", "20"))
 RATE = 2000
 
