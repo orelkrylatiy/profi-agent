@@ -36,4 +36,7 @@ def business_now(now: datetime | None = None) -> datetime:
 def in_work_hours(now: datetime | None = None) -> bool:
     """True внутри config.WORK_HOURS (часы business timezone, [lo, hi))."""
     lo, hi = config.WORK_HOURS
-    return lo <= business_now(now).hour < hi
+    h = business_now(now).hour
+    if hi > 24:  # окно через полночь: [lo, 24) U [0, hi-24)
+        return h >= lo or h < hi - 24
+    return lo <= h < hi

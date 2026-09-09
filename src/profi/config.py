@@ -189,7 +189,7 @@ def _parse_work_hours(v: str | None) -> tuple[int, int]:
         return (8, 23)
     lo, _, hi = v.partition(",")
     try:
-        return (max(0, int(lo.strip())), min(24, int(hi.strip())))
+        return (max(0, int(lo.strip())), min(25, int(hi.strip())))  # hi>24 = через полночь (8,25 → 8:00–01:00)
     except ValueError:
         return (8, 23)
 
