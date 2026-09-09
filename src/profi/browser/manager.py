@@ -66,7 +66,7 @@ class BrowserManager:
     # --- lifecycle ---
 
     def start(self) -> str:
-        """INITIALIZING → CONNECT_CDP → FIND_FEED_PAGE → SESSION_CHECK. Возвращает READY/AUTH_REQUIRED/..."""
+        """INITIALIZING → CONNECT_CDP → FIND_FEED_PAGE → SESSION_CHECK."""
         self._pw = sync_playwright().start()
         # data-testid — родной атрибут Профи: включаем testid-движок локаторов
         self._pw.selectors.set_test_id_attribute("data-testid")
@@ -87,14 +87,7 @@ class BrowserManager:
             return BROWSER_OFFLINE
 
         ctx = self._default_context()
-        page = self._find_feed_page(ctx)
-        if page is None:
-            page = ctx.new_page()
-            try:
-                page.goto(config.FEED_URL, wait_until="domcontentloaded", timeout=45_000)
-            except Exception as e:
-                log.warning("goto feed failed: %s", e)
-        self.page = page
+        self.page = self._ensure_feed_page(ctx)
         return self.check_session()
 
     def shutdown(self) -> None:
@@ -207,6 +200,49 @@ class BrowserManager:
                 continue
         return None
 
+    def _find_reusable_blank_page(self, ctx: BrowserContext) -> Page | None:
+        """Reuse supervisor's about:blank instead of leaking one tab per restart."""
+        for page in ctx.pages:
+            try:
+                if not page.is_closed() and page.url == "about:blank":
+                    return page
+            except Exception:
+                continue
+        return None
+
+    def _ensure_feed_page(self, ctx: BrowserContext) -> Page | None:
+        """Return one feed page without accumulating provisional blank tabs.
+
+        The Windows supervisor intentionally starts Chrome with ``about:blank``.
+        Reusing that page makes worker restarts idempotent. If we had to create a
+        new provisional page and navigation fails before reaching the feed, close
+        only that page; never close a pre-existing/user blank on a failed goto.
+        """
+        page = self._find_feed_page(ctx)
+        if page is not None:
+            return page
+
+        page = self._find_reusable_blank_page(ctx)
+        created_here = page is None
+        if page is None:
+            page = ctx.new_page()
+        try:
+            page.goto(config.FEED_URL, wait_until="domcontentloaded", timeout=45_000)
+        except Exception as e:
+            log.warning("goto feed failed: %s", e)
+            if created_here:
+                try:
+                    if not is_feed_url(page.url):
+                        page.close(run_before_unload=False)
+                        return None
+                except Exception:
+                    try:
+                        page.close(run_before_unload=False)
+                    except Exception:
+                        pass
+                    return None
+        return page
+
     # --- session health-check (спека разд. 7) ---
 
     def check_session(self) -> str:
@@ -292,14 +328,7 @@ class BrowserManager:
         if page_closed:
             try:
                 ctx = self._default_context()
-                page = self._find_feed_page(ctx)
-                if page is None:
-                    page = ctx.new_page()
-                    try:
-                        page.goto(config.FEED_URL, wait_until="domcontentloaded", timeout=45_000)
-                    except Exception as e:
-                        log.warning("goto feed failed: %s", e)
-                self.page = page
+                self.page = self._ensure_feed_page(ctx)
             except Exception:
                 return self.reconnect()
         state = self.check_session()

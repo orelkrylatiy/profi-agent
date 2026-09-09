@@ -36,16 +36,18 @@ def main() -> int:
 
         print(f"DB: {db_path}")
         print(
-            f"{'experiment':<20} {'var':<4} {'assigned':>8} {'llm':>5} "
-            f"{'fallback':>8} {'sent':>5} {'reply':>5} {'reply%':>8} {'avg min':>8}"
+            f"{'experiment':<20} {'var':<4} {'assigned':>8} {'eval':>5} {'llm':>5} "
+            f"{'fallback':>8} {'sent':>5} {'reply':>5} {'send%':>7} "
+            f"{'reply%':>7} {'yield%':>7} {'avg min':>8}"
         )
         for row in rows:
             avg_min = "-" if row["avg_reply_min"] is None else f"{row['avg_reply_min']:.1f}"
             print(
                 f"{row['prompt_experiment']:<20} {row['prompt_variant']:<4} "
-                f"{row['assigned']:>8} {row['generated']:>5} {row['fallbacks']:>8} "
-                f"{row['sent']:>5} {row['replied']:>5} {_pct(row['reply_rate_pct']):>8} "
-                f"{avg_min:>8}"
+                f"{row['assigned']:>8} {row['evaluated']:>5} {row['generated']:>5} "
+                f"{row['fallbacks']:>8} {row['sent']:>5} {row['replied']:>5} "
+                f"{_pct(row['send_rate_pct']):>7} {_pct(row['reply_rate_pct']):>7} "
+                f"{_pct(row['reply_yield_pct']):>7} {avg_min:>8}"
             )
 
         if args.examples > 0:
@@ -66,8 +68,9 @@ def main() -> int:
                     print(f"  #{example['order_id']}: {text[:360]}")
 
         print(
-            "\nPrimary metric: client replies / confirmed LLM sends. "
-            "Fallback sends are shown but excluded from prompt reply rate."
+            "\nPrimary acquisition metric: client replies / LLM-evaluated candidates (yield%). "
+            "send% shows how often the prompt chooses send; reply% is replies / confirmed LLM sends. "
+            "Fallback rows are shown separately and excluded from the LLM denominator."
         )
         return 0
     finally:

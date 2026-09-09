@@ -2,6 +2,7 @@
 
 from profi.models import OrderSnippet
 from profi.storage import Store
+from profi.utils.workhours import business_now
 
 
 def make_store(tmp_path) -> Store:
@@ -121,20 +122,15 @@ class TestMoneyGates:
             store.set_send_status(oid, status)
         assert store.sends_today() == 2
 
-    def test_sends_today_only_since_midnight(self, tmp_path):
-        import datetime as dt
-        import time
-
+    def test_sends_today_only_since_business_midnight(self, tmp_path):
         store = make_store(tmp_path)
         store.create_candidate(make_snippet("1"), None, None)
         store.set_send_status("1", "sent")
-        midnight = int(
-            dt.datetime.now().replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
-        )
+        current = business_now()
+        midnight = int(current.replace(hour=0, minute=0, second=0, microsecond=0).timestamp())
         store.conn.execute("UPDATE candidates SET sent_at = ?", (midnight - 3600,))
         store.conn.commit()
-        time.sleep(0.01)
-        assert store.sends_today() == 0
+        assert store.sends_today(now=current) == 0
 
 
 class TestChatLog:
