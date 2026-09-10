@@ -20,6 +20,9 @@ jobs:
       - name: Install dependencies
         run: uv sync
 
+      - name: Production worker preflight
+        run: bash scripts/account/preflight_worker.sh
+
       - name: Ruff lint
         run: uv run ruff check .
 
