@@ -24,14 +24,18 @@ curl -s -m 3 "http://127.0.0.1:${PROFI_CDP_PORT}/json/version" >/dev/null 2>&1 |
 # pgrep остаётся дешёвой оптимизацией, но НЕ является mutex: два параллельных
 # run_account.sh могут одновременно увидеть «процесса нет». Поэтому сам
 # долгоживущий worker запускается под flock, который держится весь lifetime.
-# Это закрывает реальный инцидент с двумя worker одного аккаунта и удвоенным reload-rate.
+# Перед НОВЫМ стартом обязательно проходит read-only code preflight. Уже живой
+# worker не трогаем и не гоняем preflight на каждом rhythm-check.
 WPAT="profi.main --rhythm-tag $ACC\$"
 WLOCK="$BASE/data/$ACC.worker.lock"
-if [ -f "accounts/$ACC.ready" ]; then
-  pgrep -f "$WPAT" >/dev/null 2>&1 || \
-    setsid flock -n "$WLOCK" \
-      env PROFI_RHYTHM_TAG="$ACC" PROFI_PERSONA="$PROFI_PERSONA" PROFI_DB="$PROFI_DB" \
-      PROFI_CHROME_PROFILE="$PROFI_CHROME_PROFILE" PROFI_CDP_PORT="$PROFI_CDP_PORT" \
-      ${PROFI_SUBJECTS:+PROFI_SUBJECTS="$PROFI_SUBJECTS"} \
-      xvfb-run -a uv run python -m profi.main --rhythm-tag "$ACC" >> "logs/worker-$ACC.log" 2>&1 &
+if [ -f "accounts/$ACC.ready" ] && ! pgrep -f "$WPAT" >/dev/null 2>&1; then
+  if ! bash "$BASE/scripts/account/preflight_worker.sh"; then
+    echo "worker $ACC не запущен: code preflight failed" >&2
+    exit 1
+  fi
+  setsid flock -n "$WLOCK" \
+    env PROFI_RHYTHM_TAG="$ACC" PROFI_PERSONA="$PROFI_PERSONA" PROFI_DB="$PROFI_DB" \
+    PROFI_CHROME_PROFILE="$PROFI_CHROME_PROFILE" PROFI_CDP_PORT="$PROFI_CDP_PORT" \
+    ${PROFI_SUBJECTS:+PROFI_SUBJECTS="$PROFI_SUBJECTS"} \
+    xvfb-run -a uv run python -m profi.main --rhythm-tag "$ACC" >> "logs/worker-$ACC.log" 2>&1 &
 fi
