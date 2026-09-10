@@ -1,19 +1,22 @@
 #!/bin/bash
 # shellcheck disable=SC1090
 # fix_worker.sh <account> — безопасный перезапуск воркера аккаунта.
-# Сначала read-only preflight нового кода, только потом убиваем старый worker.
+# Сначала read-only preflight нового кода + реального account env, только потом
+# убиваем старый worker.
 set -u
 ACC="${1:?usage: fix_worker.sh <account>}"
 BASE="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 export PATH="$HOME/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 cd "$BASE" || exit 1
 
-if ! bash "$BASE/scripts/account/preflight_worker.sh"; then
-  echo "worker $ACC НЕ перезапущен: preflight нового кода не прошёл" >&2
+if ! bash "$BASE/scripts/account/preflight_worker.sh" "$ACC"; then
+  echo "worker $ACC НЕ перезапущен: preflight нового кода/account env не прошёл" >&2
   exit 1
 fi
 
-set -a; . "$BASE/accounts/$ACC.env"; set +a
+set -a
+. "$BASE/accounts/$ACC.env"
+set +a
 
 # Паттерн матчит argv воркера (--rhythm-tag); свой cmdline его не содержит.
 pkill -f "profi.main --rhythm-tag $ACC\$" 2>/dev/null || true
