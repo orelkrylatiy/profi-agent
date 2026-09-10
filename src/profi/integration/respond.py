@@ -12,9 +12,9 @@
 from __future__ import annotations
 
 import logging
-import time
 import random
 import re
+import time
 
 from playwright.sync_api import BrowserContext, Page, Response
 
@@ -81,21 +81,19 @@ def hidden_marker(page) -> str | None:
     """Маркер скрытого/недоступного заказа на карточке (или None). Read-only.
 
     Текст карточки рендерится асинхронно: при первой проверке тело может
-    быть ещё пустым, поэтому даём один короткий ретрай перед сдачей.
+    быть ещё пустым или временно недоступным, поэтому даём ровно один
+    короткий ретрай перед сдачей.
     """
-    try:
-        body = page.locator("body").inner_text(timeout=3_000).lower()
-    except Exception:
-        return None
-    for _ in range(2):
-        for m in HIDDEN_MARKERS:
-            if m in body:
-                return m
-        time.sleep(1.5)
+    for attempt in range(2):
         try:
             body = page.locator("body").inner_text(timeout=3_000).lower()
         except Exception:
-            return None
+            body = ""
+        for marker in HIDDEN_MARKERS:
+            if marker in body:
+                return marker
+        if attempt == 0:
+            time.sleep(1.5)
     return None
 
 
