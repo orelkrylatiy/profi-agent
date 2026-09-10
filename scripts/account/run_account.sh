@@ -1,15 +1,17 @@
 #!/bin/bash
 # shellcheck disable=SC1090
 # run_account.sh <account> — универсальный запускатор одного аккаунта.
-export PATH=/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH="$HOME/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 # Аккаунт = файл accounts/<name>.env (PERSONA, SUBJECTS, CDP_PORT, PROFILE[, READY-флаг]).
 # БД по умолчанию: data/<name>.db. Новый акк = новый .env файл, ноль правок кода.
 set -u
 ACC="${1:?usage: run_account.sh <account>}"
-BASE=/root/profi-agent
+BASE="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 ENVF="$BASE/accounts/$ACC.env"
 [ -f "$ENVF" ] || { echo "нет аккаунта: $ENVF" >&2; exit 1; }
-set -a; . "$ENVF"; set +a
+set -a
+. "$ENVF"
+set +a
 export PROFI_DB="${PROFI_DB:-$BASE/data/$ACC.db}"
 export PROFI_CHROME_PATH="${PROFI_CHROME_PATH:-$BASE/scripts/browser/chrome-vps.sh}"
 export PROFI_RHYTHM_TAG="$ACC"
@@ -24,13 +26,13 @@ curl -s -m 3 "http://127.0.0.1:${PROFI_CDP_PORT}/json/version" >/dev/null 2>&1 |
 # pgrep остаётся дешёвой оптимизацией, но НЕ является mutex: два параллельных
 # run_account.sh могут одновременно увидеть «процесса нет». Поэтому сам
 # долгоживущий worker запускается под flock, который держится весь lifetime.
-# Перед НОВЫМ стартом обязательно проходит read-only code preflight. Уже живой
-# worker не трогаем и не гоняем preflight на каждом rhythm-check.
+# Перед НОВЫМ стартом обязательно проходит read-only code + account-config
+# preflight. Уже живой worker не трогаем на каждом rhythm-check.
 WPAT="profi.main --rhythm-tag $ACC\$"
 WLOCK="$BASE/data/$ACC.worker.lock"
 if [ -f "accounts/$ACC.ready" ] && ! pgrep -f "$WPAT" >/dev/null 2>&1; then
-  if ! bash "$BASE/scripts/account/preflight_worker.sh"; then
-    echo "worker $ACC не запущен: code preflight failed" >&2
+  if ! bash "$BASE/scripts/account/preflight_worker.sh" "$ACC"; then
+    echo "worker $ACC не запущен: code/account preflight failed" >&2
     exit 1
   fi
   setsid flock -n "$WLOCK" \
