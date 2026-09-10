@@ -28,7 +28,7 @@ if [[ -n "$ACC" ]]; then
     set +a
     export PROFI_DB="${PROFI_DB:-$BASE/data/$ACC.db}"
     export PROFI_RHYTHM_TAG="$ACC"
-    uv run python -c "from profi import config; assert config.RESPOND_MODE in {'pay', 'commission'}"
+    uv run python -c "from profi import config; assert config.RESPOND_MODE in {'pay', 'commission'}; assert (not config.FAST_PATH_ENABLED) or (config.PROFILE_FALLBACK_ENABLED and config.PROFILE_FALLBACK_TEMPLATES), 'fast-path profile fallback is not configured'"
   )
 fi
 
