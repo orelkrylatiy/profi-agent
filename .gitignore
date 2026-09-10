@@ -7,3 +7,4 @@ chrome-profile/
 .env
 .DS_Store
 accounts/*.env
+accounts/*.env.*

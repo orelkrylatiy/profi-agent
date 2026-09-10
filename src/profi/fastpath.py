@@ -10,7 +10,6 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from datetime import date
 
 from profi import config
 from profi import llm as llm_mod
@@ -21,6 +20,7 @@ from profi.copy_style import (
 )
 from profi.integration import respond as respond_mod
 from profi.utils import has_contacts, in_work_hours
+from profi.utils.workhours import business_now
 
 
 @dataclass(frozen=True)
@@ -32,20 +32,22 @@ class Decision:
 
 
 def commission_paused() -> bool:
-    """True, если сегодня уже зафиксировано исчерпание комиссии (лимит profi)."""
+    """True, если в текущий business-day уже исчерпана комиссия Profi."""
     try:
         return (
             config.COMMISSION_EXHAUSTED_FILE.read_text(encoding="utf-8").strip()
-            == date.today().isoformat()
+            == business_now().date().isoformat()
         )
     except OSError:
         return False
 
 
 def mark_commission_exhausted() -> None:
-    """Зафиксировать дату исчерпания — аккаунт стоит до конца дня (Макс, 04.09)."""
+    """Зафиксировать исчерпание комиссии для текущего business-day."""
     try:
-        config.COMMISSION_EXHAUSTED_FILE.write_text(date.today().isoformat(), encoding="utf-8")
+        config.COMMISSION_EXHAUSTED_FILE.write_text(
+            business_now().date().isoformat(), encoding="utf-8"
+        )
     except OSError:
         pass
 
@@ -223,6 +225,21 @@ def _terminal(store, order_id: str, *, send_status: str, draft_status: str, note
     return send_status
 
 
+def _unavailable(store, order_id: str, exc: Exception, *, draft_exists: bool) -> str:
+    note = f"скип: unavailable — {str(exc)[:170]}"
+    if draft_exists:
+        store.set_send_status(order_id, "skipped")
+        store.set_note(order_id, note)
+        return "skipped"
+    return _terminal(
+        store,
+        order_id,
+        send_status="skipped",
+        draft_status="skipped",
+        note=note,
+    )
+
+
 def mark_terminal_open_failure(store, order_id: str, exc: Exception) -> None:
     """No background reopen: an exhausted open attempt is terminal."""
     note = f"технический сбой открытия, без повтора: {str(exc)[:180]}"
@@ -283,26 +300,30 @@ def process_open_candidate(
 
     # Форму открываем ДО генерации ответа: если комиссионный тариф не
     # применился (в футере «К оплате: N ₽» при режиме комиссии), заказ всё
-    # равно уйдёт в скип — раньше мы об этом узнавали только после LLM
-    # (05.09: ~96 таких скипов в день на lang жгли генерацию впустую).
+    # равно уйдёт в скип — раньше мы об этом узнавали только после LLM.
     try:
         respond_mod._open_respond_form_inner(order_page, config.RESPOND_MODE)
     except respond_mod.OrderHiddenError as exc:
-        store.set_send_status(order_id, "skipped")
-        store.set_note(order_id, f"скип: заказ скрыт — {str(exc)[:160]}")
-        return "skipped"
+        return _unavailable(store, order_id, exc, draft_exists=False)
     except respond_mod.CommissionExhaustedError as exc:
         mark_commission_exhausted()
-        store.set_send_status(order_id, "skipped")
-        store.set_note(order_id, f"скип: {str(exc)[:160]} — аккаунт до завтра стоит")
-        return "skipped"
+        return _terminal(
+            store,
+            order_id,
+            send_status="skipped",
+            draft_status="skipped",
+            note=f"скип: {str(exc)[:160]} — аккаунт до завтра стоит",
+        )
     except Exception as exc:
-        # Отсутствие ожидаемого UI само по себе НЕ доказывает, что заказ мёртв.
-        # DOM/верстка/рендер могут измениться; такие случаи оставляем technical failed,
-        # чтобы ops не маскировал реальную поломку воркера под unavailable.
-        store.set_send_status(order_id, "failed")
-        store.set_note(order_id, f"fast-path form failed: {str(exc)[:180]}")
-        return "failed"
+        # Отсутствие CTA/тарифов без подтверждённого hidden-marker — технический
+        # сбой/изменение UI, а не доказательство недоступного заказа.
+        return _terminal(
+            store,
+            order_id,
+            send_status="failed",
+            draft_status="error",
+            note=f"fast-path form failed: {str(exc)[:180]}",
+        )
 
     if config.RESPOND_MODE == "commission":
         # Читаем футер сразу после открытия формы: ставку в commission не
@@ -313,13 +334,16 @@ def process_open_candidate(
         except Exception:
             early_to_pay = None
         if early_to_pay:
-            store.set_send_status(order_id, "skipped")
-            store.set_note(
+            return _terminal(
+                store,
                 order_id,
-                "скип до LLM: режим комиссии, а к оплате "
-                f"{early_to_pay} ₽ — тариф выбран неверно",
+                send_status="skipped",
+                draft_status="skipped",
+                note=(
+                    "скип до LLM: режим комиссии, а к оплате "
+                    f"{early_to_pay} ₽ — тариф выбран неверно"
+                ),
             )
-            return "skipped"
 
     base_system = system_prompt_factory()
     experiment_system = base_system + outreach_variant_prompt(variant)
@@ -365,9 +389,7 @@ def process_open_candidate(
             mode=config.RESPOND_MODE,
         )
     except respond_mod.OrderHiddenError as exc:
-        store.set_send_status(order_id, "skipped")
-        store.set_note(order_id, f"скип: заказ скрыт — {str(exc)[:160]}")
-        return "skipped"
+        return _unavailable(store, order_id, exc, draft_exists=True)
     except respond_mod.CommissionExhaustedError as exc:
         mark_commission_exhausted()
         store.set_send_status(order_id, "skipped")
