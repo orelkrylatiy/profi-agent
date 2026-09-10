@@ -24,6 +24,7 @@ echo "worker preflight: response regressions"
 uv run pytest -q \
   tests/test_respond_hidden_marker.py \
   tests/test_fast_path.py::TestProcessOpenCandidate::test_order_hidden_at_form_open_skips_before_llm \
-  tests/test_fast_path.py::TestProcessOpenCandidate::test_form_open_failure_before_llm_is_terminal_failed
+  tests/test_fast_path.py::TestProcessOpenCandidate::test_form_open_failure_before_llm_is_terminal_failed \
+  tests/test_fast_path_resilience.py::test_llm_cooldown_fallback_reaches_real_send_path
 
 echo "worker preflight: OK"
