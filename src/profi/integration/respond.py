@@ -78,8 +78,6 @@ HIDDEN_MARKERS = (
     "клиент отменил заявку",
     "клиент не готов получать отклики",
     "клиент больше не готов получать отклики",
-    "не готов получать отклики",
-    "не готов получать предложения",
 )
 
 
@@ -190,17 +188,17 @@ def _open_via_write_client(order_page: Page, mode: str) -> None:
             raise OrderHiddenError(f"заказ скрыт (маркер {marker!r})")
         try:
             cta.first.wait_for(state="visible", timeout=3_000)
-        except Exception:
+        except Exception as wait_exc:
             marker = hidden_marker(order_page)
             if marker:
-                raise OrderHiddenError(f"заказ скрыт (маркер {marker!r})")
+                raise OrderHiddenError(f"заказ скрыт (маркер {marker!r})") from wait_exc
             try:
                 tail = order_page.locator("body").inner_text(timeout=3_000)[-300:]
             except Exception:
                 tail = "<не прочитали>"
             raise RespondError(
                 f"нет ни блока тарифов, ни CTA «Написать клиенту»; хвост карточки: {tail!r}"
-            )
+            ) from wait_exc
     human_pause(0.6, 1.2)
     cta.first.click(delay=random.randint(70, 150))
     try:
