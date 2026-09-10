@@ -12,9 +12,9 @@
 from __future__ import annotations
 
 import logging
-import time
 import random
 import re
+import time
 
 from playwright.sync_api import BrowserContext, Page, Response
 
@@ -65,37 +65,39 @@ class CommissionExhaustedError(RespondError):
     """
 
 
-# Маркеры неживой карточки (lowercase, ищем в тексте страницы)
+# Маркеры неживой карточки. Здесь только достаточно специфичные фразы:
+# слишком общий кусок текста из описания заказа не должен терминально скипать
+# живого клиента.
 HIDDEN_MARKERS = (
     "заказ скрыт",
     "нельзя откликнуться",
     "заказ неактуальн",
     "заказ отменён",
     "заказ отменен",
-    "клиент отменил",
-    "не готов получать",
+    "клиент отменил заказ",
+    "клиент отменил заявку",
+    "клиент не готов получать",
+    "не готов получать отклики",
 )
 
 
 def hidden_marker(page) -> str | None:
     """Маркер скрытого/недоступного заказа на карточке (или None). Read-only.
 
-    Текст карточки рендерится асинхронно: при первой проверке тело может
-    быть ещё пустым, поэтому даём один короткий ретрай перед сдачей.
+    Текст карточки рендерится асинхронно. Делаем две ограниченные попытки;
+    ошибка/пустой body на первой попытке не считается доказательством, что
+    заказ живой. При этом без подтверждённого маркера не маскируем UI-сбой.
     """
-    try:
-        body = page.locator("body").inner_text(timeout=3_000).lower()
-    except Exception:
-        return None
-    for _ in range(2):
-        for m in HIDDEN_MARKERS:
-            if m in body:
-                return m
-        time.sleep(1.5)
+    for attempt in range(2):
         try:
             body = page.locator("body").inner_text(timeout=3_000).lower()
         except Exception:
-            return None
+            body = ""
+        for marker in HIDDEN_MARKERS:
+            if marker in body:
+                return marker
+        if attempt == 0:
+            time.sleep(1.5)
     return None
 
 
