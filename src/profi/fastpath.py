@@ -297,8 +297,15 @@ def process_open_candidate(
         store.set_note(order_id, f"скип: {str(exc)[:160]} — аккаунт до завтра стоит")
         return "skipped"
     except Exception as exc:
+        # Мёртвый заказ (скрыт/отменён/недоступен) — не технический сбой:
+        # skipped:unavailable, не пачкаем failed (решение владельца 10.09).
+        msg = str(exc)
+        if "нет ни блока тарифов" in msg.lower() or any(m in msg.lower() for m in respond_mod.HIDDEN_MARKERS):
+            store.set_send_status(order_id, "skipped")
+            store.set_note(order_id, f"скип: unavailable — {msg[:170]}")
+            return "skipped"
         store.set_send_status(order_id, "failed")
-        store.set_note(order_id, f"fast-path form failed: {str(exc)[:180]}")
+        store.set_note(order_id, f"fast-path form failed: {msg[:180]}")
         return "failed"
 
     if config.RESPOND_MODE == "commission":
@@ -367,8 +374,13 @@ def process_open_candidate(
         store.set_note(order_id, f"скип: {str(exc)[:160]} — аккаунт до завтра стоит")
         return "skipped"
     except Exception as exc:
+        msg = str(exc)
+        if "нет ни блока тарифов" in msg.lower() or any(m in msg.lower() for m in respond_mod.HIDDEN_MARKERS):
+            store.set_send_status(order_id, "skipped")
+            store.set_note(order_id, f"скип: unavailable — {msg[:170]}")
+            return "skipped"
         store.set_send_status(order_id, "failed")
-        store.set_note(order_id, f"fast-path form failed: {str(exc)[:180]}")
+        store.set_note(order_id, f"fast-path form failed: {msg[:180]}")
         return "failed"
 
     due, why = _payment_due(config.RESPOND_MODE, footer)

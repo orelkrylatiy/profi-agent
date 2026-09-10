@@ -71,18 +71,30 @@ HIDDEN_MARKERS = (
     "заказ неактуальн",
     "заказ отменён",
     "заказ отменен",
+    "клиент отменил",
+    "не готов получать",
 )
 
 
 def hidden_marker(page) -> str | None:
-    """Маркер скрытого/недоступного заказа на карточке (или None). Read-only."""
+    """Маркер скрытого/недоступного заказа на карточке (или None). Read-only.
+
+    Текст карточки рендерится асинхронно: при первой проверке тело может
+    быть ещё пустым, поэтому даём один короткий ретрай перед сдачей.
+    """
     try:
         body = page.locator("body").inner_text(timeout=3_000).lower()
     except Exception:
         return None
-    for m in HIDDEN_MARKERS:
-        if m in body:
-            return m
+    for _ in range(2):
+        for m in HIDDEN_MARKERS:
+            if m in body:
+                return m
+        time.sleep(1.5)
+        try:
+            body = page.locator("body").inner_text(timeout=3_000).lower()
+        except Exception:
+            return None
     return None
 
 
