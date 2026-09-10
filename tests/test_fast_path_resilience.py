@@ -152,9 +152,7 @@ def test_llm_cooldown_fallback_reaches_real_send_path(monkeypatch):
     monkeypatch.setattr(
         fastpath.respond_mod,
         "click_send",
-        lambda page, ctx, rate=None: {
-            "url_after": "https://profi.ru/backoffice/r.php?id=93790001"
-        },
+        lambda page, ctx, rate=None: {"url_after": "https://profi.ru/backoffice/r.php?id=93790001"},
     )
     monkeypatch.setattr(fastpath.respond_mod, "send_failed", lambda outcome: False)
 
