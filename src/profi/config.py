@@ -168,7 +168,9 @@ REMOTE_ONLY = PROFILE.remote_only if PROFILE else True
 
 # --- Денежные предохранители ---
 MAX_RESPONSE_PRICE_RUB = int(_get("PROFI_MAX_RESPONSE_PRICE", "500"))
-DAILY_SEND_LIMIT = int(_get("PROFI_DAILY_SEND_LIMIT", "0"))  # 0 = без лимита (решение владельца 02.09)
+DAILY_SEND_LIMIT = int(
+    _get("PROFI_DAILY_SEND_LIMIT", "0")
+)  # 0 = без лимита (решение владельца 02.09)
 MAX_COMPETITION_POSITION = int(_get("PROFI_MAX_POSITION", "20"))
 RATE = 2000
 
@@ -189,7 +191,10 @@ def _parse_work_hours(v: str | None) -> tuple[int, int]:
         return (8, 23)
     lo, _, hi = v.partition(",")
     try:
-        return (max(0, int(lo.strip())), min(25, int(hi.strip())))  # hi>24 = через полночь (8,25 → 8:00–01:00)
+        return (
+            max(0, int(lo.strip())),
+            min(25, int(hi.strip())),
+        )  # hi>24 = через полночь (8,25 → 8:00–01:00)
     except ValueError:
         return (8, 23)
 
