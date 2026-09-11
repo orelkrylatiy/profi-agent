@@ -65,26 +65,31 @@ class CommissionExhaustedError(RespondError):
     """
 
 
-# Маркеры неживой карточки (lowercase, ищем в тексте страницы)
+# Маркеры неживой карточки. Здесь только достаточно специфичные фразы:
+# слишком общий кусок текста из описания заказа не должен терминально скипать
+# живого клиента.
 HIDDEN_MARKERS = (
     "заказ скрыт",
     "нельзя откликнуться",
     "заказ неактуальн",
     "заказ отменён",
     "заказ отменен",
-    "клиент отменил",
-    "не готов получать",
+    "клиент отменил заказ",
+    "клиент отменил заявку",
+    "клиент не готов получать отклики",
+    "клиент больше не готов получать отклики",
 )
 
 
-def hidden_marker(page) -> str | None:
-    """Маркер скрытого/недоступного заказа на карточке (или None). Read-only.
+def hidden_marker(page, *, retry: bool = False) -> str | None:
+    """Вернуть подтверждённый маркер недоступного заказа, если он есть.
 
-    Текст карточки рендерится асинхронно: при первой проверке тело может
-    быть ещё пустым или временно недоступным, поэтому даём ровно один
-    короткий ретрай перед сдачей.
+    На обычной живой карточке делаем только одно read-only чтение, чтобы не
+    добавлять задержку в fast-path. Bounded retry включается лишь когда ожидаемый
+    UI уже отсутствует: тогда асинхронный текст ошибки мог ещё не дорендериться.
     """
-    for attempt in range(2):
+    attempts = 2 if retry else 1
+    for attempt in range(attempts):
         try:
             body = page.locator("body").inner_text(timeout=3_000).lower()
         except Exception:
@@ -92,7 +97,7 @@ def hidden_marker(page) -> str | None:
         for marker in HIDDEN_MARKERS:
             if marker in body:
                 return marker
-        if attempt == 0:
+        if attempt + 1 < attempts:
             time.sleep(1.5)
     return None
 
@@ -174,16 +179,26 @@ def _open_via_write_client(order_page: Page, mode: str) -> None:
         WRITE_CLIENT_CTA, exact=False
     )
     if cta.count() == 0:
-        marker = hidden_marker(order_page)
+        # Отсутствие CTA само по себе НЕ доказывает, что заказ мёртвый: это
+        # также бывает при медленном рендере/изменении DOM. Сначала ждём
+        # подтверждённый unavailable-marker, затем даём CTA короткий шанс
+        # дорендериться. Только явный marker становится OrderHiddenError.
+        marker = hidden_marker(order_page, retry=True)
         if marker:
             raise OrderHiddenError(f"заказ скрыт (маркер {marker!r})")
         try:
-            tail = order_page.locator("body").inner_text(timeout=3_000)[-300:]
-        except Exception:
-            tail = "<не прочитали>"
-        raise RespondError(
-            f"нет ни блока тарифов, ни CTA «Написать клиенту»; хвост карточки: {tail!r}"
-        )
+            cta.first.wait_for(state="visible", timeout=3_000)
+        except Exception as wait_exc:
+            marker = hidden_marker(order_page)
+            if marker:
+                raise OrderHiddenError(f"заказ скрыт (маркер {marker!r})") from wait_exc
+            try:
+                tail = order_page.locator("body").inner_text(timeout=3_000)[-300:]
+            except Exception:
+                tail = "<не прочитали>"
+            raise RespondError(
+                f"нет ни блока тарифов, ни CTA «Написать клиенту»; хвост карточки: {tail!r}"
+            ) from wait_exc
     human_pause(0.6, 1.2)
     cta.first.click(delay=random.randint(70, 150))
     try:
@@ -246,6 +261,7 @@ def open_respond_form(
 
 
 def _open_respond_form_inner(order_page: Page, mode: str) -> Page:
+    # Быстрый read-only check без обязательной задержки на живой карточке.
     marker = hidden_marker(order_page)
     if marker:
         raise OrderHiddenError(f"заказ скрыт (маркер {marker!r})")

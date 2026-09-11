@@ -1,19 +1,27 @@
 #!/bin/bash
 # shellcheck disable=SC1090
 # fix_worker.sh <account> — безопасный перезапуск воркера аккаунта.
-# Сначала read-only preflight нового кода, только потом убиваем старый worker.
+# Сначала read-only preflight нового кода + реального account env, только потом
+# убиваем старый worker.
 set -u
 ACC="${1:?usage: fix_worker.sh <account>}"
 BASE="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 export PATH="$HOME/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 cd "$BASE" || exit 1
 
-if ! bash "$BASE/scripts/account/preflight_worker.sh"; then
-  echo "worker $ACC НЕ перезапущен: preflight нового кода не прошёл" >&2
+if ! bash "$BASE/scripts/account/preflight_worker.sh" "$ACC"; then
+  echo "worker $ACC НЕ перезапущен: preflight нового кода/account env не прошёл" >&2
   exit 1
 fi
 
-set -a; . "$BASE/accounts/$ACC.env"; set +a
+set -a
+. "$BASE/accounts/$ACC.env"
+set +a
+export PROFI_DB="${PROFI_DB:-$BASE/data/$ACC.db}"
+export PROFI_CHROME_PATH="${PROFI_CHROME_PATH:-$BASE/scripts/browser/chrome-vps.sh}"
+
+# Не подставляем account alias в PROFI_PERSONA: если persona не задана явно,
+# config.py берёт её из PROFI_PROFILE/default profile.
 
 # Паттерн матчит argv воркера (--rhythm-tag); свой cmdline его не содержит.
 pkill -f "profi.main --rhythm-tag $ACC\$" 2>/dev/null || true
@@ -24,10 +32,8 @@ WLOCK="$BASE/data/$ACC.worker.lock"
 # На forced restart ждём освобождения singleton-lock, а не теряем единственную
 # попытку старта из-за короткого overlap окна.
 setsid flock -w 15 "$WLOCK" \
-  env PROFI_RHYTHM_TAG="$ACC" PROFI_PERSONA="$PROFI_PERSONA" \
-  PROFI_DB="${PROFI_DB:-$BASE/data/$ACC.db}" \
+  env PROFI_RHYTHM_TAG="$ACC" PROFI_DB="$PROFI_DB" \
   PROFI_CHROME_PROFILE="$PROFI_CHROME_PROFILE" PROFI_CDP_PORT="$PROFI_CDP_PORT" \
-  PROFI_CHROME_PATH="${PROFI_CHROME_PATH:-$BASE/scripts/browser/chrome-vps.sh}" \
   ${PROFI_SUBJECTS:+PROFI_SUBJECTS="$PROFI_SUBJECTS"} \
   xvfb-run -a uv run python -m profi.main --rhythm-tag "$ACC" >> "logs/worker-$ACC.log" 2>&1 &
 sleep 8

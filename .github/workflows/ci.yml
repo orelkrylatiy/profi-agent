@@ -21,7 +21,9 @@ jobs:
         run: uv sync
 
       - name: Production worker preflight
-        run: bash scripts/account/preflight_worker.sh
+        run: |
+          cp accounts/lang.env.example accounts/ci-preflight.env
+          bash scripts/account/preflight_worker.sh ci-preflight
 
       - name: Ruff lint
         run: uv run ruff check .
@@ -33,9 +35,10 @@ jobs:
       - name: Tests
         run: uv run pytest -q
 
-      # В репозитории есть старый format-only debt, не связанный с runtime.
-      # Не даём косметическому шуму обесценивать красный CI: функциональные,
-      # lint и production-preflight гейты выше остаются blocking.
+      # В base/main всё ещё есть 3 старых format-only места, не связанные
+      # с runtime и не затронутые этим PR. Не делаем существующий style debt
+      # блокером релиза; production-preflight, lint, shellcheck и pytest выше
+      # остаются blocking.
       - name: Legacy Ruff format report
         continue-on-error: true
         run: uv run ruff format --check .
