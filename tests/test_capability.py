@@ -37,7 +37,9 @@ def test_capability_classifier_recognizes_specific_signals():
     no_money = RuntimeError("Недостаточно средств. Пополните баланс")
     assert capability.classify_form_error(no_money, "pay") == capability.NO_BALANCE
 
-    no_commission = RuntimeError("в модалке тарифа нет опции «Комиссия» — доступен только платный отклик")
+    no_commission = RuntimeError(
+        "в модалке тарифа нет опции «Комиссия» — доступен только платный отклик"
+    )
     assert (
         capability.classify_form_error(no_commission, "commission")
         == capability.COMMISSION_UNAVAILABLE
@@ -137,7 +139,9 @@ def test_pay_mode_no_balance_blocks_before_llm(monkeypatch, isolated_capability)
     assert state.status == capability.NO_BALANCE
     assert state.balance_rub == 0
     assert state.to_pay_rub == 200
-    assert not any(call[0] == "prompt" for call in store.calls) is False
+    # Current experiment semantics assign a stable arm before the live form probe;
+    # the A/B denominator still uses only draft_source='llm' (evaluated).
+    assert any(call[0] == "prompt" for call in store.calls)
 
 
 def test_active_capability_block_skips_response_ui_and_llm(monkeypatch, isolated_capability):
