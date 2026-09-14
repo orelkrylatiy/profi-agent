@@ -12,15 +12,14 @@ from __future__ import annotations
 import argparse
 import json
 import sqlite3
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 
 def _read_json(path: Path, default):
     try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-        return value
-    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
         return default
 
 
@@ -198,7 +197,7 @@ def build(root: Path, *, days: int = 30) -> dict:
 
     return {
         "schema_version": 1,
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": datetime.now(UTC).isoformat(),
         "source_date": latest.get("date"),
         "source_code_revision": latest.get("code_revision"),
         "timezone": latest.get("timezone"),
