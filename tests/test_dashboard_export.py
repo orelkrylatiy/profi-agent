@@ -118,6 +118,9 @@ def test_dashboard_export_is_pseudonymous_and_aggregate_only(tmp_path):
     (root / "accounts" / "info.env").write_text("PROFI_DB=data/info.db\n", encoding="utf-8")
     _make_experiment_db(root / "data" / "info.db")
     _make_experiment_db(root / "data" / "phantom.db")
+    (root / "data" / "phantom.capability.json").write_text(
+        json.dumps({"status": "READY"}), encoding="utf-8"
+    )
 
     capability = {
         "status": "NO_BALANCE",
@@ -149,6 +152,7 @@ def test_dashboard_export_is_pseudonymous_and_aggregate_only(tmp_path):
     assert str(output) in proc.stdout
 
     payload = json.loads(output.read_text(encoding="utf-8"))
+    assert payload["schema_version"] == 2
     assert [account["id"] for account in payload["accounts"]] == ["account_1"]
     assert payload["accounts"][0]["label"] == "Аккаунт 1"
     assert payload["accounts"][0]["capability"]["status"] == "NO_BALANCE"

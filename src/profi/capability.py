@@ -34,7 +34,6 @@ BLOCKING_STATUSES = {
     NO_BALANCE,
     COMMISSION_UNAVAILABLE,
     COMMISSION_DAILY_LIMIT,
-    AUTH_REQUIRED,
     UI_UNKNOWN,
 }
 
@@ -222,7 +221,12 @@ def classify_form_error(exc: Exception, mode: str) -> str | None:
     ):
         return COMMISSION_DAILY_LIMIT
 
-    return UI_UNKNOWN
+    # Generic RespondError means Profi rendered a response surface we no
+    # longer recognize. Arbitrary RuntimeError/Playwright/network failures are
+    # technical per-order failures and must not freeze every account candidate.
+    if name == "RespondError":
+        return UI_UNKNOWN
+    return None
 
 
 def _optional_int(value) -> int | None:

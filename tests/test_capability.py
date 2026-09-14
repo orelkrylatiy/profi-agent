@@ -28,9 +28,17 @@ def test_capability_state_persists_and_expires(tmp_path):
     assert loaded.blocked_until == 1_060
 
 
-def test_capability_classifier_does_not_guess_balance_from_unknown_ui():
-    err = RuntimeError("нет ни блока тарифов, ни CTA «Написать клиенту»")
+def test_capability_classifier_marks_structural_respond_error_as_unknown_ui():
+    class RespondError(Exception):
+        pass
+
+    err = RespondError("нет ни блока тарифов, ни CTA «Написать клиенту»")
     assert capability.classify_form_error(err, "pay") == capability.UI_UNKNOWN
+
+
+def test_capability_classifier_does_not_poison_account_on_generic_failure():
+    err = RuntimeError("temporary page/network failure")
+    assert capability.classify_form_error(err, "pay") is None
 
 
 def test_capability_classifier_recognizes_specific_signals():

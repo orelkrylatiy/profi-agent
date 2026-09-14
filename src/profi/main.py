@@ -26,7 +26,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from profi import config
+from profi import capability, config
 from profi.browser import AUTH_REQUIRED, BROWSER_OFFLINE, BrowserManager
 from profi.filters import hard_filter
 from profi.integration.feed import FeedAmbiguous, FeedAuthError, FeedCapture, FeedCaptureError
@@ -250,17 +250,9 @@ def run_loop(max_cycles: int | None = None) -> int:
                 log.info("нерабочие часы — мониторинг спит (проверка раз в 10 мин)")
                 time.sleep(10 * 60)
                 continue
-            from profi.fastpath import commission_paused
-
-            if config.RESPOND_MODE == "commission" and commission_paused():
-                # Дневной лимит profi на «Комиссию» исчерпан (замок в модалке
-                # тарифа, инцидент lang 04.09): по решению владельца аккаунт
-                # целиком встаёт до завтра — LLM не тратим, ленту не дёргаем.
-                log.info(
-                    "комиссия на сегодня исчерпана — аккаунт приостановлен (проверка раз в 10 мин)"
-                )
-                time.sleep(10 * 60)
-                continue
+            # Account-level response blockers never stop acquisition. The
+            # fast-path checks commission/capability before response UI or LLM,
+            # while this loop keeps the feed fresh for observability and recovery.
             # LLM cooldown больше не останавливает acquisition: fresh-order
             # fast-path использует profile fallback. Чаты и legacy-autopilot
             # по-прежнему уважают cooldown и не тратят LLM-квоту.
@@ -276,9 +268,22 @@ def run_loop(max_cycles: int | None = None) -> int:
                     return 1
                 log.info("стартовое состояние: %s (max_cycles=%s)", state, max_cycles)
                 if state == AUTH_REQUIRED:
+                    capability.mark(
+                        capability.AUTH_REQUIRED,
+                        "browser session requires login",
+                        ttl_s=config.AUTH_WAIT_S,
+                    )
                     show_login_hint()
 
             state = run_cycle(bm, store)
+            if state == AUTH_REQUIRED:
+                capability.mark(
+                    capability.AUTH_REQUIRED,
+                    "browser session requires login",
+                    ttl_s=config.AUTH_WAIT_S,
+                )
+            elif state == "OK" and capability.load_state().status == capability.AUTH_REQUIRED:
+                capability.mark(capability.UNKNOWN, "browser session recovered", ttl_s=1)
             done += 1
             # Чаты в том же процессе: каждый N-й цикл после успешной ленты.
             # run_chat_auto сам берёт autopilot.lock (не полезет под автопилот)

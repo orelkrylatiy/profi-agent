@@ -18,7 +18,6 @@ BLOCKING_CAPABILITY_STATUSES = {
     "NO_BALANCE",
     "COMMISSION_UNAVAILABLE",
     "COMMISSION_DAILY_LIMIT",
-    "AUTH_REQUIRED",
     "UI_UNKNOWN",
 }
 
@@ -70,15 +69,6 @@ def _discover_accounts(root: Path) -> dict[str, Path]:
             if db.exists():
                 found[account] = db.resolve()
 
-    # A capability file is created only by our worker. It is a conservative
-    # fallback for an account whose env is temporarily invisible to collector.
-    data_dir = root / "data"
-    if data_dir.exists():
-        for cap in sorted(data_dir.glob("*.capability.json")):
-            stem = cap.name.removesuffix(".capability.json")
-            db = data_dir / f"{stem}.db"
-            if db.exists() and stem not in found:
-                found[stem] = db.resolve()
     return found
 
 
@@ -280,6 +270,8 @@ def build(root: Path, *, days: int = 30) -> dict:
         warnings.append(f"legacy_history_skipped:{legacy_history_skipped}")
 
     accounts = _discover_accounts(root)
+    if not accounts:
+        warnings.append("no_explicit_accounts_discovered")
     aliases = _stable_aliases(root, list(accounts))
 
     public_accounts = []
@@ -343,7 +335,7 @@ def main() -> int:
     args = parser.parse_args()
 
     root = (args.root or Path(__file__).resolve().parents[2]).resolve()
-    output = args.output or root / "ops" / "dashboard.json"
+    output = args.output or root / "dashboard" / "public" / "ops" / "dashboard.json"
     payload = build(root, days=args.days)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(

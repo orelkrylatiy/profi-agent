@@ -13,6 +13,8 @@ export type Capability = {
   checked_at: number
   blocked_until: number
   respond_mode: string
+  blocking_active: boolean
+  probe_due: boolean
   balance_known: boolean
   price_known: boolean
 }
@@ -25,8 +27,14 @@ export type AccountMetrics = {
     drafts_generated: number
     sends_started: number
     responses_sent: number
+    responses_unknown: number
   }
   cohort: {
+    candidates: number
+    details_ready: number
+    drafts_generated: number
+    responses_sent: number
+    responses_unknown: number
     responses_failed: number
     responses_skipped: number
     client_replied: number
@@ -86,14 +94,16 @@ export type ExperimentRow = {
 }
 
 export type DashboardData = {
-  schema_version: number
+  schema_version: 2
   generated_at: string
   source_date: string | null
+  source_generated_at: string | null
   source_code_revision: string | null
   timezone: string | null
-  totals: Record<string, unknown>
+  experiment_scope: 'all_time_current_db' | string
   accounts: Account[]
   history: HistoryRow[]
   experiments: ExperimentRow[]
+  data_quality: { warnings: string[]; legacy_history_skipped: number }
   privacy: Record<string, boolean>
 }

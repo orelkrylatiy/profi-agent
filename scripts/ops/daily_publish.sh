@@ -54,14 +54,13 @@ if [ ! -f "$DASHBOARD_PATH" ]; then
   exit 1
 fi
 
-git add -- "$REPORT_PATH" ops/latest.json "$DASHBOARD_PATH"
-if git diff --cached --quiet -- "$REPORT_PATH" ops/latest.json "$DASHBOARD_PATH"; then
+git add -- "$REPORT_PATH" ops/latest.json
+if git diff --cached --quiet -- "$REPORT_PATH" ops/latest.json; then
   echo "ops publish: изменений за $DATE_SPEC нет"
   exit 0
 fi
 
 REPORT_DATE="$(basename "$REPORT_PATH" .json)"
-git commit -m "ops: daily snapshot $REPORT_DATE" -- \
-  "$REPORT_PATH" ops/latest.json "$DASHBOARD_PATH"
+git commit -m "ops: daily snapshot $REPORT_DATE" -- "$REPORT_PATH" ops/latest.json
 git push origin "$BRANCH"
-echo "ops publish: опубликованы $REPORT_PATH и $DASHBOARD_PATH"
+echo "ops publish: опубликован $REPORT_PATH; локальный dashboard обновлён: $DASHBOARD_PATH"

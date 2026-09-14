@@ -1,6 +1,6 @@
 # Profi Agent Dashboard
 
-Локальная/внутренняя визуализация поверх privacy-safe `ops/dashboard.json`.
+Локальная/внутренняя визуализация поверх privacy-safe `dashboard/public/ops/dashboard.json`.
 Dashboard ничего не знает о cookies, логинах Profi, order ids, именах клиентов или raw logs.
 
 ## Что показывает
@@ -16,7 +16,7 @@ V1 использует `@mantine/core` + `@mantine/charts` (Recharts). Это �
 
 ## Данные
 
-`scripts/ops/dashboard_export.py` строит `ops/dashboard.json` из:
+`scripts/ops/dashboard_export.py` строит `dashboard/public/ops/dashboard.json` из:
 
 1. `ops/latest.json` и `ops/daily/*.json` — агрегированная история;
 2. локальных account SQLite DB — только агрегаты `v_prompt_experiments`;
@@ -24,7 +24,7 @@ V1 использует `@mantine/core` + `@mantine/charts` (Recharts). Это �
 
 Публикуемые аккаунты получают псевдонимы `account_1`, `account_2`, ... . Точный баланс и стоимость отклика остаются только локально; dashboard получает лишь `balance_known` / `price_known`.
 
-`daily_publish.sh` автоматически обновляет dataset вместе с дневным snapshot.
+`daily_publish.sh` автоматически обновляет локальный dataset вместе с дневным snapshot, но не добавляет его в Git. Для удалённого доступа dashboard нужно раздавать приватно.
 
 ## Запуск
 
@@ -35,7 +35,7 @@ npm install
 npm run dev
 ```
 
-По умолчанию frontend запрашивает `/ops/dashboard.json`. Для отдельного хостинга можно задать:
+По умолчанию frontend запрашивает dataset относительно Vite base (`ops/dashboard.json`). Для отдельного хостинга можно задать:
 
 ```bash
 VITE_DASHBOARD_DATA_URL=https://example.internal/ops/dashboard.json npm run build

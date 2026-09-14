@@ -100,9 +100,11 @@ function KpiCard({
 function AccountCard({ account }: { account: Account }) {
   const { capability, metrics } = account
   const feedHealthy = metrics.runtime.worker_seen_today
-  const sends = metrics.events.responses_sent
-  const candidates = metrics.events.candidates
+  const sends = metrics.cohort.responses_sent
+  const candidates = metrics.cohort.candidates
   const conversion = candidates ? (sends / candidates) * 100 : 0
+  const capabilityText = capability.probe_due ? 'Нужна перепроверка' : capabilityLabel(capability.status)
+  const capabilityBadgeColor = capability.probe_due ? 'blue' : capabilityColor(capability.status)
 
   return (
     <Card radius="lg" padding="lg" withBorder className="account-card">
@@ -118,8 +120,8 @@ function AccountCard({ account }: { account: Account }) {
                   : 'Режим не определён'}
             </Text>
           </div>
-          <Badge color={capabilityColor(capability.status)} variant="light" size="lg">
-            {capabilityLabel(capability.status)}
+          <Badge color={capabilityBadgeColor} variant="light" size="lg">
+            {capabilityText}
           </Badge>
         </Group>
 
@@ -140,9 +142,19 @@ function AccountCard({ account }: { account: Account }) {
           <Text size="xs" c="dimmed" lineClamp={2}>
             {capability.reason}
           </Text>
-          {capability.blocked_until > 0 && (
+          {capability.blocking_active && capability.blocked_until > 0 && (
             <Text size="xs" mt={6} c="dimmed">
-              Повторная проверка: {formatTimestamp(capability.blocked_until)}
+              Автопроверка не раньше: {formatTimestamp(capability.blocked_until)}
+            </Text>
+          )}
+          {capability.probe_due && (
+            <Text size="xs" mt={6} c="blue">
+              Блокировка истекла — следующий подходящий заказ станет read-only probe.
+            </Text>
+          )}
+          {capability.checked_at > 0 && (
+            <Text size="xs" mt={4} c="dimmed">
+              Проверено: {formatTimestamp(capability.checked_at)}
             </Text>
           )}
         </Paper>
@@ -171,7 +183,7 @@ function AccountCard({ account }: { account: Account }) {
         <div>
           <Group justify="space-between" mb={5}>
             <Text size="xs" c="dimmed">
-              candidate → sent
+              cohort candidate → sent
             </Text>
             <Text size="xs" fw={600}>
               {compactNumber.format(conversion)}%
@@ -194,16 +206,19 @@ function Overview({ data }: { data: DashboardData }) {
       drafts: sum(accounts.map((account) => account.metrics.events.drafts_generated)),
       sends: sum(accounts.map((account) => account.metrics.events.responses_sent)),
       replies: sum(accounts.map((account) => account.metrics.cohort.client_replied)),
+      cohortCandidates: sum(accounts.map((account) => account.metrics.cohort.candidates)),
+      cohortDetails: sum(accounts.map((account) => account.metrics.cohort.details_ready)),
+      cohortDrafts: sum(accounts.map((account) => account.metrics.cohort.drafts_generated)),
+      cohortSends: sum(accounts.map((account) => account.metrics.cohort.responses_sent)),
       incidents: sum(accounts.map((account) => account.metrics.runtime.availability_incidents)),
     }
   }, [data.accounts])
 
   const funnelData = [
-    { stage: 'Новые', value: current.feed },
-    { stage: 'Кандидаты', value: current.candidates },
-    { stage: 'Детали', value: current.details },
-    { stage: 'Драфты', value: current.drafts },
-    { stage: 'Отправки', value: current.sends },
+    { stage: 'Кандидаты', value: current.cohortCandidates },
+    { stage: 'Детали', value: current.cohortDetails },
+    { stage: 'Драфты', value: current.cohortDrafts },
+    { stage: 'Отправки', value: current.cohortSends },
     { stage: 'Ответы', value: current.replies },
   ]
 
@@ -249,7 +264,7 @@ function Overview({ data }: { data: DashboardData }) {
         <Card radius="lg" padding="lg" withBorder>
           <Text fw={700}>Воронка сегодня</Text>
           <Text size="xs" c="dimmed" mb="md">
-            Где именно теряются подходящие заказы
+            Cohort заказов, впервые увиденных сегодня — без смешивания с event-счётчиками
           </Text>
           <BarChart
             h={300}
@@ -323,7 +338,7 @@ function Experiments({ rows }: { rows: ExperimentRow[] }) {
               <div>
                 <Title order={3}>{experiment}</Title>
                 <Text size="sm" c="dimmed">
-                  Основная метрика: replies / LLM-evaluated candidates (yield)
+                  Основная метрика: replies / LLM-evaluated candidates (yield). Данные — вся текущая БД.
                 </Text>
               </div>
               <Badge variant="outline">
@@ -571,6 +586,17 @@ function Dashboard({
         </Group>
 
         <Divider />
+
+        {(data.data_quality.warnings.length > 0 || !data.source_generated_at) && (
+          <Alert color="yellow" title="Проверь свежесть данных">
+            {data.source_generated_at
+              ? `Исходный ops-срез: ${data.source_generated_at}. `
+              : 'У исходного ops-среза нет времени генерации. '}
+            {data.data_quality.warnings.length > 0
+              ? `Data quality: ${data.data_quality.warnings.join(', ')}`
+              : ''}
+          </Alert>
+        )}
 
         <Tabs defaultValue="overview" variant="pills" keepMounted={false}>
           <Tabs.List mb="xl">

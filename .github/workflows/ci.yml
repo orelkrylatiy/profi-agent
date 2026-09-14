@@ -56,6 +56,9 @@ jobs:
       - name: Install dashboard dependencies
         run: npm install --no-audit --no-fund
 
+      - name: Test dashboard data contract
+        run: npm test
+
       - name: Build dashboard
         run: npm run build
 
