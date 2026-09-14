@@ -1,0 +1,62 @@
+name: Dashboard polish rerun
+
+on:
+  push:
+    branches:
+      - feature/capability-dashboard-v1
+
+permissions:
+  contents: write
+
+jobs:
+  rerun:
+    if: ${{ !contains(github.event.head_commit.message, '[dashboard-polish]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/capability-dashboard-v1
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Reapply reviewed patch with TS literal fix
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          workflow = Path('.github/workflows/dashboard-final-polish.yml').read_text(encoding='utf-8').splitlines()
+          start = next(i for i, line in enumerate(workflow) if "python - <<'PY'" in line)
+          end = next(i for i in range(start + 1, len(workflow)) if workflow[i].strip() == 'PY')
+          script_lines = []
+          for line in workflow[start + 1:end]:
+              script_lines.append(line[10:] if line.startswith('          ') else line)
+          exec(compile('\n'.join(script_lines), '<dashboard-polish>', 'exec'), {})
+
+          test = Path('dashboard/src/data.test.ts')
+          text = test.read_text(encoding='utf-8')
+          old = '  schema_version: 2,\n'
+          if old not in text:
+              raise SystemExit('schema_version fixture not found')
+          test.write_text(text.replace(old, '  schema_version: 2 as const,\n', 1), encoding='utf-8')
+          PY
+
+      - name: Generate lockfile and validate
+        working-directory: dashboard
+        run: |
+          npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+          npm ci --no-audit --no-fund
+          npm test
+          npm run build
+
+      - name: Commit polish
+        run: |
+          git diff --check
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/workflows/ci.yml dashboard
+          git commit -m "fix: clarify dashboard freshness and reproducible build [dashboard-polish]"
+          git push origin HEAD:feature/capability-dashboard-v1
