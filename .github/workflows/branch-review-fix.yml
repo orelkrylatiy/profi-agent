@@ -1,0 +1,236 @@
+name: Branch architecture review fixer
+
+on:
+  push:
+    branches:
+      - feature/capability-dashboard-v1
+
+permissions:
+  contents: write
+
+jobs:
+  apply-review-fixes:
+    if: ${{ !contains(github.event.head_commit.message, '[review-fix]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/capability-dashboard-v1
+          fetch-depth: 0
+
+      - name: Apply reviewed fixes
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace(path: str, old: str, new: str, count: int = 1) -> None:
+              p = Path(path)
+              text = p.read_text(encoding="utf-8")
+              actual = text.count(old)
+              if actual < count:
+                  raise SystemExit(f"{path}: expected at least {count} occurrence(s), found {actual}")
+              text = text.replace(old, new, count)
+              p.write_text(text, encoding="utf-8")
+
+          # 1) The worker must keep acquisition alive even when commission sending is blocked.
+          replace(
+              "src/profi/main.py",
+              "from profi import config\n",
+              "from profi import capability, config\n",
+          )
+          replace(
+              "src/profi/main.py",
+              '''            from profi.fastpath import commission_paused\n\n            if config.RESPOND_MODE == "commission" and commission_paused():\n                # Дневной лимит profi на «Комиссию» исчерпан (замок в модалке\n                # тарифа, инцидент lang 04.09): по решению владельца аккаунт\n                # целиком встаёт до завтра — LLM не тратим, ленту не дёргаем.\n                log.info(\n                    "комиссия на сегодня исчерпана — аккаунт приостановлен (проверка раз в 10 мин)"\n                )\n                time.sleep(10 * 60)\n                continue\n''',
+              '''            # Account-level response blockers never stop acquisition. The\n            # fast-path checks commission/capability before response UI or LLM,\n            # while this loop keeps the feed fresh for observability and recovery.\n''',
+          )
+          replace(
+              "src/profi/main.py",
+              '''                if state == AUTH_REQUIRED:\n                    show_login_hint()\n\n            state = run_cycle(bm, store)\n''',
+              '''                if state == AUTH_REQUIRED:\n                    capability.mark(\n                        capability.AUTH_REQUIRED,\n                        "browser session requires login",\n                        ttl_s=config.AUTH_WAIT_S,\n                    )\n                    show_login_hint()\n\n            state = run_cycle(bm, store)\n            if state == AUTH_REQUIRED:\n                capability.mark(\n                    capability.AUTH_REQUIRED,\n                    "browser session requires login",\n                    ttl_s=config.AUTH_WAIT_S,\n                )\n            elif state == "OK" and capability.load_state().status == capability.AUTH_REQUIRED:\n                capability.mark(capability.UNKNOWN, "browser session recovered", ttl_s=1)\n''',
+          )
+
+          # 2) AUTH_REQUIRED is diagnostic (browser gate already blocks); only structural UI
+          #    failures should poison response capability. Random technical exceptions must not.
+          replace(
+              "src/profi/capability.py",
+              '''    COMMISSION_DAILY_LIMIT,\n    AUTH_REQUIRED,\n    UI_UNKNOWN,\n''',
+              '''    COMMISSION_DAILY_LIMIT,\n    UI_UNKNOWN,\n''',
+          )
+          replace(
+              "src/profi/capability.py",
+              '''    return UI_UNKNOWN\n\n\ndef _optional_int(value) -> int | None:\n''',
+              '''    # Generic RespondError means Profi rendered a response surface we no\n    # longer recognize. Arbitrary RuntimeError/Playwright/network failures are\n    # technical per-order failures and must not freeze every account candidate.\n    if name == "RespondError":\n        return UI_UNKNOWN\n    return None\n\n\ndef _optional_int(value) -> int | None:\n''',
+          )
+
+          # 3) Dashboard account discovery is explicit only. DB filenames are not account IDs
+          #    (e.g. account info may use data/profi.db), so capability-file guessing can create
+          #    duplicate phantom accounts.
+          replace(
+              "scripts/ops/dashboard_export.py",
+              '''    "COMMISSION_DAILY_LIMIT",\n    "AUTH_REQUIRED",\n    "UI_UNKNOWN",\n''',
+              '''    "COMMISSION_DAILY_LIMIT",\n    "UI_UNKNOWN",\n''',
+          )
+          replace(
+              "scripts/ops/dashboard_export.py",
+              '''\n    # A capability file is created only by our worker. It is a conservative\n    # fallback for an account whose env is temporarily invisible to collector.\n    data_dir = root / "data"\n    if data_dir.exists():\n        for cap in sorted(data_dir.glob("*.capability.json")):\n            stem = cap.name.removesuffix(".capability.json")\n            db = data_dir / f"{stem}.db"\n            if db.exists() and stem not in found:\n                found[stem] = db.resolve()\n    return found\n''',
+              '''\n    return found\n''',
+          )
+          replace(
+              "scripts/ops/dashboard_export.py",
+              '''    accounts = _discover_accounts(root)\n    aliases = _stable_aliases(root, list(accounts))\n''',
+              '''    accounts = _discover_accounts(root)\n    if not accounts:\n        warnings.append("no_explicit_accounts_discovered")\n    aliases = _stable_aliases(root, list(accounts))\n''',
+          )
+          replace(
+              "scripts/ops/dashboard_export.py",
+              '''    output = args.output or root / "ops" / "dashboard.json"\n''',
+              '''    output = args.output or root / "dashboard" / "public" / "ops" / "dashboard.json"\n''',
+          )
+
+          # 4) Dashboard dataset is local/private by default. Daily aggregate snapshots keep
+          #    their existing publication flow; operational dashboard state is not added to Git.
+          replace(
+              "scripts/ops/daily_publish.sh",
+              '''git add -- "$REPORT_PATH" ops/latest.json "$DASHBOARD_PATH"\nif git diff --cached --quiet -- "$REPORT_PATH" ops/latest.json "$DASHBOARD_PATH"; then\n''',
+              '''git add -- "$REPORT_PATH" ops/latest.json\nif git diff --cached --quiet -- "$REPORT_PATH" ops/latest.json; then\n''',
+          )
+          replace(
+              "scripts/ops/daily_publish.sh",
+              '''git commit -m "ops: daily snapshot $REPORT_DATE" -- \\\n  "$REPORT_PATH" ops/latest.json "$DASHBOARD_PATH"\ngit push origin "$BRANCH"\necho "ops publish: опубликованы $REPORT_PATH и $DASHBOARD_PATH"\n''',
+              '''git commit -m "ops: daily snapshot $REPORT_DATE" -- "$REPORT_PATH" ops/latest.json\ngit push origin "$BRANCH"\necho "ops publish: опубликован $REPORT_PATH; локальный dashboard обновлён: $DASHBOARD_PATH"\n''',
+          )
+
+          # 5) Frontend/exporter schema and base-path contract.
+          Path("dashboard/src/data.ts").write_text('''import type { DashboardData } from './types'\n\nconst expectedSchemaVersion = 2\n\nexport function dashboardDataUrl(): string {\n  const explicit = import.meta.env.VITE_DASHBOARD_DATA_URL\n  if (explicit) return explicit\n  return `${import.meta.env.BASE_URL}ops/dashboard.json`\n}\n\nexport function validateDashboardData(payload: unknown): DashboardData {\n  if (!payload || typeof payload !== 'object') {\n    throw new Error('dashboard data: payload is not an object')\n  }\n  const data = payload as Partial<DashboardData>\n  if (data.schema_version !== expectedSchemaVersion) {\n    throw new Error(`dashboard data: unsupported schema ${String(data.schema_version)}`)\n  }\n  if (!Array.isArray(data.accounts) || !Array.isArray(data.history) || !Array.isArray(data.experiments)) {\n    throw new Error('dashboard data: malformed collections')\n  }\n  return data as DashboardData\n}\n\nexport async function loadDashboardData(signal?: AbortSignal): Promise<DashboardData> {\n  const response = await fetch(dashboardDataUrl(), { signal, cache: 'no-store' })\n  if (!response.ok) {\n    throw new Error(`dashboard data: HTTP ${response.status}`)\n  }\n  return validateDashboardData(await response.json())\n}\n''', encoding="utf-8")
+
+          Path("dashboard/src/types.ts").write_text('''export type CapabilityStatus =\n  | 'UNKNOWN'\n  | 'READY'\n  | 'NO_BALANCE'\n  | 'COMMISSION_UNAVAILABLE'\n  | 'COMMISSION_DAILY_LIMIT'\n  | 'AUTH_REQUIRED'\n  | 'UI_UNKNOWN'\n\nexport type Capability = {\n  status: CapabilityStatus | string\n  reason: string\n  checked_at: number\n  blocked_until: number\n  respond_mode: string\n  blocking_active: boolean\n  probe_due: boolean\n  balance_known: boolean\n  price_known: boolean\n}\n\nexport type AccountMetrics = {\n  events: {\n    feed_new_orders: number\n    candidates: number\n    details_ready: number\n    drafts_generated: number\n    sends_started: number\n    responses_sent: number\n    responses_unknown: number\n  }\n  cohort: {\n    candidates: number\n    details_ready: number\n    drafts_generated: number\n    responses_sent: number\n    responses_unknown: number\n    responses_failed: number\n    responses_skipped: number\n    client_replied: number\n    reply_yield_pct: number | null\n  }\n  runtime: {\n    worker_seen_today: boolean\n    supervisor_seen_today: boolean\n    last_seen_at: string | null\n    availability_incidents: number\n    events: Record<string, number>\n  }\n  inventory: {\n    send_status: Record<string, number>\n    details_errors: number\n    draft_errors: number\n  }\n}\n\nexport type Account = {\n  id: string\n  label: string\n  capability: Capability\n  metrics: AccountMetrics\n}\n\nexport type HistoryRow = {\n  date: string\n  feed_new_orders: number\n  feed_orders_seen: number\n  candidates: number\n  details_ready: number\n  drafts_generated: number\n  sends_started: number\n  responses_sent: number\n  responses_unknown: number\n  responses_failed: number\n  responses_skipped: number\n  client_replied: number\n  availability_incidents: number\n}\n\nexport type ExperimentRow = {\n  account_id: string\n  prompt_experiment: string\n  prompt_variant: string\n  assigned: number\n  evaluated: number\n  generated: number\n  fallbacks: number\n  sent: number\n  replied: number\n  send_rate_pct: number | null\n  reply_rate_pct: number | null\n  reply_yield_pct: number | null\n  avg_reply_min: number | null\n}\n\nexport type DashboardData = {\n  schema_version: 2\n  generated_at: string\n  source_date: string | null\n  source_generated_at: string | null\n  source_code_revision: string | null\n  timezone: string | null\n  experiment_scope: 'all_time_current_db' | string\n  accounts: Account[]\n  history: HistoryRow[]\n  experiments: ExperimentRow[]\n  data_quality: { warnings: string[]; legacy_history_skipped: number }\n  privacy: Record<string, boolean>\n}\n''', encoding="utf-8")
+
+          # 6) UI semantics: top cards remain event metrics, conversion/funnel are cohort-only;
+          #    expired blockers are shown as probes due rather than current failures.
+          replace(
+              "dashboard/src/App.tsx",
+              '''  const feedHealthy = metrics.runtime.worker_seen_today\n  const sends = metrics.events.responses_sent\n  const candidates = metrics.events.candidates\n  const conversion = candidates ? (sends / candidates) * 100 : 0\n''',
+              '''  const feedHealthy = metrics.runtime.worker_seen_today\n  const sends = metrics.cohort.responses_sent\n  const candidates = metrics.cohort.candidates\n  const conversion = candidates ? (sends / candidates) * 100 : 0\n  const capabilityText = capability.probe_due ? 'Нужна перепроверка' : capabilityLabel(capability.status)\n  const capabilityBadgeColor = capability.probe_due ? 'blue' : capabilityColor(capability.status)\n''',
+          )
+          replace(
+              "dashboard/src/App.tsx",
+              '''          <Badge color={capabilityColor(capability.status)} variant="light" size="lg">\n            {capabilityLabel(capability.status)}\n          </Badge>\n''',
+              '''          <Badge color={capabilityBadgeColor} variant="light" size="lg">\n            {capabilityText}\n          </Badge>\n''',
+          )
+          replace(
+              "dashboard/src/App.tsx",
+              '''          {capability.blocked_until > 0 && (\n            <Text size="xs" mt={6} c="dimmed">\n              Повторная проверка: {formatTimestamp(capability.blocked_until)}\n            </Text>\n          )}\n''',
+              '''          {capability.blocking_active && capability.blocked_until > 0 && (\n            <Text size="xs" mt={6} c="dimmed">\n              Автопроверка не раньше: {formatTimestamp(capability.blocked_until)}\n            </Text>\n          )}\n          {capability.probe_due && (\n            <Text size="xs" mt={6} c="blue">\n              Блокировка истекла — следующий подходящий заказ станет read-only probe.\n            </Text>\n          )}\n          {capability.checked_at > 0 && (\n            <Text size="xs" mt={4} c="dimmed">\n              Проверено: {formatTimestamp(capability.checked_at)}\n            </Text>\n          )}\n''',
+          )
+          replace(
+              "dashboard/src/App.tsx",
+              '''              candidate → sent\n''',
+              '''              cohort candidate → sent\n''',
+          )
+          replace(
+              "dashboard/src/App.tsx",
+              '''      replies: sum(accounts.map((account) => account.metrics.cohort.client_replied)),\n      incidents: sum(accounts.map((account) => account.metrics.runtime.availability_incidents)),\n''',
+              '''      replies: sum(accounts.map((account) => account.metrics.cohort.client_replied)),\n      cohortCandidates: sum(accounts.map((account) => account.metrics.cohort.candidates)),\n      cohortDetails: sum(accounts.map((account) => account.metrics.cohort.details_ready)),\n      cohortDrafts: sum(accounts.map((account) => account.metrics.cohort.drafts_generated)),\n      cohortSends: sum(accounts.map((account) => account.metrics.cohort.responses_sent)),\n      incidents: sum(accounts.map((account) => account.metrics.runtime.availability_incidents)),\n''',
+          )
+          replace(
+              "dashboard/src/App.tsx",
+              '''  const funnelData = [\n    { stage: 'Новые', value: current.feed },\n    { stage: 'Кандидаты', value: current.candidates },\n    { stage: 'Детали', value: current.details },\n    { stage: 'Драфты', value: current.drafts },\n    { stage: 'Отправки', value: current.sends },\n    { stage: 'Ответы', value: current.replies },\n  ]\n''',
+              '''  const funnelData = [\n    { stage: 'Кандидаты', value: current.cohortCandidates },\n    { stage: 'Детали', value: current.cohortDetails },\n    { stage: 'Драфты', value: current.cohortDrafts },\n    { stage: 'Отправки', value: current.cohortSends },\n    { stage: 'Ответы', value: current.replies },\n  ]\n''',
+          )
+          replace(
+              "dashboard/src/App.tsx",
+              '''            Где именно теряются подходящие заказы\n''',
+              '''            Cohort заказов, впервые увиденных сегодня — без смешивания с event-счётчиками\n''',
+          )
+          replace(
+              "dashboard/src/App.tsx",
+              '''                  Основная метрика: replies / LLM-evaluated candidates (yield)\n''',
+              '''                  Основная метрика: replies / LLM-evaluated candidates (yield). Данные — вся текущая БД.\n''',
+          )
+
+          # Add a compact freshness/data-quality warning above tabs.
+          replace(
+              "dashboard/src/App.tsx",
+              '''        <Divider />\n\n        <Tabs defaultValue="overview" variant="pills" keepMounted={false}>\n''',
+              '''        <Divider />\n\n        {(data.data_quality.warnings.length > 0 || !data.source_generated_at) && (\n          <Alert color="yellow" title="Проверь свежесть данных">\n            {data.source_generated_at\n              ? `Исходный ops-срез: ${data.source_generated_at}. `\n              : 'У исходного ops-среза нет времени генерации. '}\n            {data.data_quality.warnings.length > 0\n              ? `Data quality: ${data.data_quality.warnings.join(', ')}`\n              : ''}\n          </Alert>\n        )}\n\n        <Tabs defaultValue="overview" variant="pills" keepMounted={false}>\n''',
+          )
+
+          # 7) Frontend contract tests. A successful compile alone did not catch schema drift.
+          package = Path("dashboard/package.json").read_text(encoding="utf-8")
+          package = package.replace('''    "build": "tsc -b && vite build",\n    "preview": "vite preview"\n''', '''    "build": "tsc -b && vite build",\n    "test": "vitest run",\n    "preview": "vite preview"\n''')
+          package = package.replace('''    "typescript": "^5.9.0",\n    "vite": "^8.0.0"\n''', '''    "typescript": "^5.9.0",\n    "vite": "^8.0.0",\n    "vitest": "^3.2.4"\n''')
+          Path("dashboard/package.json").write_text(package, encoding="utf-8")
+
+          Path("dashboard/src/data.test.ts").write_text('''import { afterEach, describe, expect, it, vi } from 'vitest'\n\nimport { loadDashboardData, validateDashboardData } from './data'\n\nconst payload = {\n  schema_version: 2,\n  generated_at: '2026-09-14T12:00:00Z',\n  source_date: '2026-09-14',\n  source_generated_at: '2026-09-14T11:59:00+05:00',\n  source_code_revision: 'abc123',\n  timezone: 'Asia/Yekaterinburg',\n  experiment_scope: 'all_time_current_db',\n  accounts: [],\n  history: [],\n  experiments: [],\n  data_quality: { warnings: [], legacy_history_skipped: 0 },\n  privacy: {},\n}\n\nafterEach(() => vi.unstubAllGlobals())\n\ndescribe('dashboard data contract', () => {\n  it('accepts exporter schema v2', () => {\n    expect(validateDashboardData(payload).schema_version).toBe(2)\n  })\n\n  it('rejects stale schema v1 instead of rendering misleading data', () => {\n    expect(() => validateDashboardData({ ...payload, schema_version: 1 })).toThrow(\n      /unsupported schema/,\n    )\n  })\n\n  it('loads a valid v2 payload through fetch', async () => {\n    vi.stubGlobal(\n      'fetch',\n      vi.fn(async () => new Response(JSON.stringify(payload), { status: 200 })),\n    )\n    await expect(loadDashboardData()).resolves.toMatchObject({ schema_version: 2 })\n  })\n})\n''', encoding="utf-8")
+
+          # CI runs frontend contract tests before build.
+          replace(
+              ".github/workflows/ci.yml",
+              '''      - name: Build dashboard\n        run: npm run build\n''',
+              '''      - name: Test dashboard data contract\n        run: npm test\n\n      - name: Build dashboard\n        run: npm run build\n''',
+          )
+
+          # 8) Python regressions for architecture invariants.
+          cap_test = Path("tests/test_capability.py")
+          text = cap_test.read_text(encoding="utf-8")
+          text = text.replace(
+              '''def test_capability_classifier_does_not_guess_balance_from_unknown_ui():\n    err = RuntimeError("нет ни блока тарифов, ни CTA «Написать клиенту»")\n    assert capability.classify_form_error(err, "pay") == capability.UI_UNKNOWN\n''',
+              '''def test_capability_classifier_marks_structural_respond_error_as_unknown_ui():\n    class RespondError(Exception):\n        pass\n\n    err = RespondError("нет ни блока тарифов, ни CTA «Написать клиенту»")\n    assert capability.classify_form_error(err, "pay") == capability.UI_UNKNOWN\n\n\ndef test_capability_classifier_does_not_poison_account_on_generic_failure():\n    err = RuntimeError("temporary page/network failure")\n    assert capability.classify_form_error(err, "pay") is None\n''',
+          )
+          cap_test.write_text(text, encoding="utf-8")
+
+          fast_test = Path("tests/test_fast_path.py")
+          text = fast_test.read_text(encoding="utf-8")
+          anchor = '''    def test_worker_does_not_sleep_just_because_llm_is_in_cooldown(self, monkeypatch):\n'''
+          addition = '''    def test_worker_keeps_feed_running_when_commission_day_is_paused(self, monkeypatch):\n        class BM:\n            def __init__(self):\n                self.started = False\n\n            def start(self):\n                self.started = True\n                return "READY"\n\n            def shutdown(self):\n                pass\n\n            def context(self):\n                return object()\n\n        class DummyStore:\n            def __init__(self, path):\n                pass\n\n            def close(self):\n                pass\n\n        bm = BM()\n        monkeypatch.setattr(main, "BrowserManager", lambda: bm)\n        monkeypatch.setattr(main, "Store", DummyStore)\n        monkeypatch.setattr(main, "in_work_hours", lambda: True)\n        monkeypatch.setattr(main, "_send_pause_active", lambda: False)\n        monkeypatch.setattr(main.config, "RESPOND_MODE", "commission")\n        seen = []\n        monkeypatch.setattr(main, "run_cycle", lambda bm, store: seen.append(1) or "OK")\n        monkeypatch.setattr(main.config, "CHAT_CHECK_EVERY_CYCLES", 999)\n        monkeypatch.setattr(\n            main.time,\n            "sleep",\n            lambda seconds: pytest.fail(f"worker unexpectedly slept for {seconds}s"),\n        )\n        assert main.run_loop(max_cycles=1) == 0\n        assert bm.started is True\n        assert seen == [1]\n\n'''
+          if anchor not in text:
+              raise SystemExit("test_fast_path.py: worker test anchor not found")
+          text = text.replace(anchor, addition + anchor, 1)
+          fast_test.write_text(text, encoding="utf-8")
+
+          dash_test = Path("tests/test_dashboard_export.py")
+          text = dash_test.read_text(encoding="utf-8")
+          text = text.replace(
+              '''    payload = json.loads(output.read_text(encoding="utf-8"))\n    assert [account["id"] for account in payload["accounts"]] == ["account_1"]\n''',
+              '''    payload = json.loads(output.read_text(encoding="utf-8"))\n    assert payload["schema_version"] == 2\n    assert [account["id"] for account in payload["accounts"]] == ["account_1"]\n''',
+              1,
+          )
+          # Ensure a capability sidecar without an account env cannot become a phantom account.
+          text = text.replace(
+              '''    _make_experiment_db(root / "data" / "phantom.db")\n\n    capability = {\n''',
+              '''    _make_experiment_db(root / "data" / "phantom.db")\n    (root / "data" / "phantom.capability.json").write_text(\n        json.dumps({"status": "READY"}), encoding="utf-8"\n    )\n\n    capability = {\n''',
+              1,
+          )
+          dash_test.write_text(text, encoding="utf-8")
+
+          # 9) Local dataset is intentionally not a public-repo artifact.
+          with Path(".gitignore").open("a", encoding="utf-8") as f:
+              f.write("dashboard/public/ops/dashboard.json\n")
+
+          # README path/privacy semantics.
+          readme = Path("dashboard/README.md")
+          text = readme.read_text(encoding="utf-8")
+          text = text.replace("`ops/dashboard.json`", "`dashboard/public/ops/dashboard.json`")
+          text = text.replace(
+              "`daily_publish.sh` автоматически обновляет dataset вместе с дневным snapshot.",
+              "`daily_publish.sh` автоматически обновляет локальный dataset вместе с дневным snapshot, но не добавляет его в Git. Для удалённого доступа dashboard нужно раздавать приватно.",
+          )
+          text = text.replace(
+              "По умолчанию frontend запрашивает `/ops/dashboard.json`.",
+              "По умолчанию frontend запрашивает dataset относительно Vite base (`ops/dashboard.json`).",
+          )
+          readme.write_text(text, encoding="utf-8")
+          PY
+
+      - name: Commit review fixes
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo "No changes"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix: architecture review follow-ups [review-fix]"
+          git push origin HEAD:feature/capability-dashboard-v1
