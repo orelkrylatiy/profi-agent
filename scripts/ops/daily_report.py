@@ -185,38 +185,26 @@ def _git_revision(root: Path) -> str | None:
     return proc.stdout.strip() or None
 
 
-def _discover_databases(root: Path) -> dict[str, Path]:
+def _configured_databases(root: Path) -> dict[str, Path]:
+    # Explicit local account allowlist from accounts/*.env.
+    # Arbitrary data/*.db files are diagnostics/state, not accounts.
     found: dict[str, Path] = {}
-    used_paths: set[Path] = set()
-
     accounts_dir = root / "accounts"
-    if accounts_dir.exists():
-        for env_path in sorted(accounts_dir.glob("*.env")):
-            account = env_path.stem
-            env = _read_env(env_path)
-            raw_db = env.get("PROFI_DB")
-            db_path = Path(raw_db) if raw_db else root / "data" / f"{account}.db"
-            if not db_path.is_absolute():
-                db_path = root / db_path
-            db_path = db_path.resolve()
-            if db_path.exists():
-                found[account] = db_path
-                used_paths.add(db_path)
-
-    data_dir = root / "data"
-    if data_dir.exists():
-        for db_path in sorted(data_dir.glob("*.db")):
-            resolved = db_path.resolve()
-            if resolved in used_paths:
-                continue
-            key = db_path.stem
-            suffix = 2
-            while key in found:
-                key = f"{db_path.stem}-{suffix}"
-                suffix += 1
-            found[key] = resolved
-            used_paths.add(resolved)
+    if not accounts_dir.exists():
+        return found
+    for env_path in sorted(accounts_dir.glob("*.env")):
+        account = env_path.stem
+        env = _read_env(env_path)
+        raw_db = env.get("PROFI_DB")
+        db_path = Path(raw_db) if raw_db else root / "data" / f"{account}.db"
+        if not db_path.is_absolute():
+            db_path = root / db_path
+        found[account] = db_path.resolve()
     return found
+
+
+def _discover_databases(root: Path) -> dict[str, Path]:
+    return {account: path for account, path in _configured_databases(root).items() if path.exists()}
 
 
 def _empty_runtime() -> dict:
@@ -580,7 +568,7 @@ def _incident_count(timestamps: list[datetime]) -> int:
     return incidents
 
 
-def _scan_logs(root: Path, target: date) -> dict:
+def _scan_logs(root: Path, target: date, *, allowed_accounts: set[str] | None = None) -> dict:
     log_dir = root / "logs"
     target_s = target.isoformat()
     levels: Counter[str] = Counter()
@@ -617,9 +605,12 @@ def _scan_logs(root: Path, target: date) -> dict:
                 ignored_other_log_files += 1
             continue
 
-        files_scanned += 1
         source = match.group("source")
         account = match.group("account") or "global"
+        if allowed_accounts is not None and account != "global" and account not in allowed_accounts:
+            ignored_other_log_files += 1
+            continue
+        files_scanned += 1
         files_by_account[account] += 1
         current_date: str | None = None
         current_ts: datetime | None = None
@@ -755,9 +746,16 @@ def _merge_totals(accounts: dict[str, dict], logs: dict) -> dict:
 
 def build_report(root: Path, target: date, tz: tzinfo) -> dict:
     start_ts, end_ts = _window_epoch(target, tz)
-    databases = _discover_databases(root)
-    accounts = {account: _db_metrics(path, start_ts, end_ts) for account, path in databases.items()}
-    logs = _scan_logs(root, target)
+    configured = _configured_databases(root)
+    accounts: dict[str, dict] = {}
+    for account, path in configured.items():
+        if path.exists():
+            accounts[account] = _db_metrics(path, start_ts, end_ts)
+        else:
+            metrics = _empty_metrics()
+            metrics["db_read_error"] = True
+            accounts[account] = metrics
+    logs = _scan_logs(root, target, allowed_accounts=set(configured))
 
     runtime_by_account = logs.pop("runtime_by_account", {})
     for account, runtime in runtime_by_account.items():
