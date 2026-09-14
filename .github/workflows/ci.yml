@@ -35,13 +35,32 @@ jobs:
       - name: Tests
         run: uv run pytest -q
 
-      # В base/main всё ещё есть 3 старых format-only места, не связанные
-      # с runtime и не затронутые этим PR. Не делаем существующий style debt
-      # блокером релиза; production-preflight, lint, shellcheck и pytest выше
-      # остаются blocking.
+      # В base/main всё ещё есть старые format-only места. Runtime gates выше
+      # остаются blocking; style debt пока только видим в отчёте.
       - name: Legacy Ruff format report
         continue-on-error: true
         run: uv run ruff format --check .
+
+  dashboard-build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dashboard
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install dashboard dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Test dashboard data contract
+        run: npm test
+
+      - name: Build dashboard
+        run: npm run build
 
   windows-supervisor:
     runs-on: windows-latest

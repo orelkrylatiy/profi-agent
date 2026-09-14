@@ -8,3 +8,6 @@ chrome-profile/
 .DS_Store
 accounts/*.env
 accounts/*.env.*
+dashboard/node_modules/
+dashboard/dist/
+dashboard/public/ops/dashboard.json

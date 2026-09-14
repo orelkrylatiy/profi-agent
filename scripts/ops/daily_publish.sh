@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Generate one privacy-safe daily snapshot and publish only ops/ files to GitHub.
-# Intended for a clean VPS clone. Local/manual use can call daily_report.py directly.
+# Generate privacy-safe daily + dashboard snapshots and publish only ops/ files to GitHub.
+# Intended for a clean VPS clone. Local/manual use can call collectors directly.
 set -euo pipefail
 
 BASE="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -40,11 +40,17 @@ command -v "$PYTHON_BIN" >/dev/null 2>&1 || {
 # Keep the clean VPS clone current before generating code_revision.
 git pull --ff-only origin "$BRANCH"
 
-# Collector uses only Python stdlib. Do not run it through uv: daily publishing
-# must not depend on PyPI/DNS or reinstall project/dev dependencies.
+# Collectors use only Python stdlib. Do not run them through uv: scheduled
+# publishing must not depend on PyPI/DNS or reinstall project/dev dependencies.
 REPORT_PATH="$("$PYTHON_BIN" scripts/ops/daily_report.py --date "$DATE_SPEC" --timezone "$TIMEZONE")"
 if [ ! -f "$REPORT_PATH" ]; then
   echo "ops publish: отчёт не создан: $REPORT_PATH" >&2
+  exit 1
+fi
+
+DASHBOARD_PATH="$("$PYTHON_BIN" scripts/ops/dashboard_export.py)"
+if [ ! -f "$DASHBOARD_PATH" ]; then
+  echo "ops publish: dashboard dataset не создан: $DASHBOARD_PATH" >&2
   exit 1
 fi
 
@@ -57,4 +63,4 @@ fi
 REPORT_DATE="$(basename "$REPORT_PATH" .json)"
 git commit -m "ops: daily snapshot $REPORT_DATE" -- "$REPORT_PATH" ops/latest.json
 git push origin "$BRANCH"
-echo "ops publish: опубликован $REPORT_PATH"
+echo "ops publish: опубликован $REPORT_PATH; локальный dashboard обновлён: $DASHBOARD_PATH"

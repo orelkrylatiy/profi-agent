@@ -639,6 +639,46 @@ class TestWorkerIntegration:
         assert seen == ["93400001"]
         assert page.closed is True
 
+    def test_worker_keeps_feed_running_when_commission_day_is_paused(self, monkeypatch):
+        class BM:
+            def __init__(self):
+                self.started = False
+
+            def start(self):
+                self.started = True
+                return "READY"
+
+            def shutdown(self):
+                pass
+
+            def context(self):
+                return object()
+
+        class DummyStore:
+            def __init__(self, path):
+                pass
+
+            def close(self):
+                pass
+
+        bm = BM()
+        monkeypatch.setattr(main, "BrowserManager", lambda: bm)
+        monkeypatch.setattr(main, "Store", DummyStore)
+        monkeypatch.setattr(main, "in_work_hours", lambda: True)
+        monkeypatch.setattr(main, "_send_pause_active", lambda: False)
+        monkeypatch.setattr(main.config, "RESPOND_MODE", "commission")
+        seen = []
+        monkeypatch.setattr(main, "run_cycle", lambda bm, store: seen.append(1) or "OK")
+        monkeypatch.setattr(main.config, "CHAT_CHECK_EVERY_CYCLES", 999)
+        monkeypatch.setattr(
+            main.time,
+            "sleep",
+            lambda seconds: pytest.fail(f"worker unexpectedly slept for {seconds}s"),
+        )
+        assert main.run_loop(max_cycles=1) == 0
+        assert bm.started is True
+        assert seen == [1]
+
     def test_worker_does_not_sleep_just_because_llm_is_in_cooldown(self, monkeypatch):
         class BM:
             def __init__(self):

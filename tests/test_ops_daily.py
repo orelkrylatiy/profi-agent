@@ -103,6 +103,8 @@ def _make_db(path: Path) -> None:
 
 
 def _run_report(tmp_path: Path) -> tuple[dict, str]:
+    (tmp_path / "accounts").mkdir(exist_ok=True)
+    (tmp_path / "accounts" / "info.env").write_text("PROFI_DB=data/info.db\n", encoding="utf-8")
     repo_root = Path(__file__).resolve().parents[1]
     script = repo_root / "scripts" / "ops" / "daily_report.py"
     proc = subprocess.run(
@@ -236,3 +238,20 @@ def test_daily_report_is_aggregate_only(tmp_path: Path):
     assert "Секретный текст" not in report_text
     assert "secret.example" not in report_text
     assert report["privacy"]["aggregate_only"] is True
+
+
+def test_daily_report_ignores_unconfigured_databases_and_canonical_logs(tmp_path: Path):
+    (tmp_path / "data").mkdir()
+    (tmp_path / "logs").mkdir()
+    _make_db(tmp_path / "data" / "info.db")
+    _make_db(tmp_path / "data" / "vps.db")
+    (tmp_path / "logs" / "worker-vps.log").write_text(
+        "2026-09-03 13:00:00 ERROR profi.main: FEED_CAPTURE_ERROR\n",
+        encoding="utf-8",
+    )
+
+    report, report_text = _run_report(tmp_path)
+
+    assert set(report["accounts"]) == {"info"}
+    assert '"vps"' not in report_text
+    assert report["logs"]["ignored_other_log_files"] >= 1

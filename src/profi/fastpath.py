@@ -11,7 +11,7 @@ import hashlib
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
-from profi import config
+from profi import capability, config
 from profi import llm as llm_mod
 from profi.copy_style import (
     OUTREACH_EXPERIMENT_ID,
@@ -240,6 +240,32 @@ def _unavailable(store, order_id: str, exc: Exception, *, draft_exists: bool) ->
     )
 
 
+def _int_or_none(value) -> int | None:
+    try:
+        return int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _mark_form_capability(exc: Exception) -> str | None:
+    status = capability.classify_form_error(exc, config.RESPOND_MODE)
+    if status is None:
+        return None
+    if status == capability.COMMISSION_DAILY_LIMIT:
+        mark_commission_exhausted()
+        capability.mark_commission_daily_limit("commission daily limit reached")
+    elif status == capability.NO_BALANCE:
+        capability.mark(capability.NO_BALANCE, "Profi reports insufficient balance")
+    elif status == capability.COMMISSION_UNAVAILABLE:
+        capability.mark(
+            capability.COMMISSION_UNAVAILABLE,
+            "commission tariff is unavailable for this account",
+        )
+    else:
+        capability.mark_ui_unknown("response form or CTA is not recognized")
+    return status
+
+
 def mark_terminal_open_failure(store, order_id: str, exc: Exception) -> None:
     """No background reopen: an exhausted open attempt is terminal."""
     note = f"технический сбой открытия, без повтора: {str(exc)[:180]}"
@@ -263,6 +289,10 @@ def process_open_candidate(
     Before generation the candidate receives one persisted A/B/C prompt arm.
     The exact arm survives model retries and process restarts. Fallback sends are
     still tagged with the arm, but experiment statistics exclude fallback source.
+
+    The first eligible order after a capability cooldown doubles as a live probe.
+    While a known account-level blocker is fresh, we keep the feed alive but do
+    not touch response UI or spend LLM quota for that candidate.
     """
     if not in_work_hours():
         return _terminal(
@@ -283,7 +313,7 @@ def process_open_candidate(
         )
 
     if config.RESPOND_MODE == "commission" and commission_paused():
-        # Страховка на случай вызова мимо общего гейта в run_loop: LLM не тратим.
+        capability.mark_commission_daily_limit("commission daily limit reached")
         return _terminal(
             store,
             order_id,
@@ -292,31 +322,68 @@ def process_open_candidate(
             note="скип: комиссия на сегодня исчерпана, аккаунт приостановлен до завтра",
         )
 
+    current_capability = capability.load_state()
+    if current_capability.is_blocked():
+        return _terminal(
+            store,
+            order_id,
+            send_status="skipped",
+            draft_status="skipped",
+            note=(
+                "скип: account capability "
+                f"{current_capability.status} до {current_capability.blocked_until}"
+            ),
+        )
+
     variant = store.assign_prompt_variant(
         order_id,
         OUTREACH_EXPERIMENT_ID,
         OUTREACH_VARIANT_IDS,
     )
 
-    # Форму открываем ДО генерации ответа: если комиссионный тариф не
-    # применился (в футере «К оплате: N ₽» при режиме комиссии), заказ всё
-    # равно уйдёт в скип — раньше мы об этом узнавали только после LLM.
+    # Форму открываем ДО генерации ответа: первый eligible order после cooldown
+    # одновременно является live capability probe, без отдельного тестового отклика.
     try:
         respond_mod._open_respond_form_inner(order_page, config.RESPOND_MODE)
     except respond_mod.OrderHiddenError as exc:
+        # Неживой конкретный заказ не должен портить account capability.
         return _unavailable(store, order_id, exc, draft_exists=False)
     except respond_mod.CommissionExhaustedError as exc:
-        mark_commission_exhausted()
+        status = _mark_form_capability(exc)
+        if status == capability.COMMISSION_DAILY_LIMIT:
+            note = f"скип: {str(exc)[:160]} — аккаунт до завтра стоит"
+        elif status == capability.COMMISSION_UNAVAILABLE:
+            note = "скип: тариф «Комиссия» сейчас недоступен для аккаунта"
+        else:
+            note = f"fast-path form failed: {str(exc)[:180]}"
         return _terminal(
             store,
             order_id,
-            send_status="skipped",
-            draft_status="skipped",
-            note=f"скип: {str(exc)[:160]} — аккаунт до завтра стоит",
+            send_status="skipped" if status != capability.UI_UNKNOWN else "failed",
+            draft_status="skipped" if status != capability.UI_UNKNOWN else "error",
+            note=note,
         )
     except Exception as exc:
-        # Отсутствие CTA/тарифов без подтверждённого hidden-marker — технический
-        # сбой/изменение UI, а не доказательство недоступного заказа.
+        status = _mark_form_capability(exc)
+        # Specific money/tariff blockers are expected account states. Ambiguous
+        # DOM/UI failure remains technical failed and is retried only after a
+        # short UI_UNKNOWN cooldown on the next eligible order.
+        if status in {capability.NO_BALANCE, capability.COMMISSION_UNAVAILABLE}:
+            return _terminal(
+                store,
+                order_id,
+                send_status="skipped",
+                draft_status="skipped",
+                note=f"скип: account capability {status}",
+            )
+        if status == capability.COMMISSION_DAILY_LIMIT:
+            return _terminal(
+                store,
+                order_id,
+                send_status="skipped",
+                draft_status="skipped",
+                note="скип: комиссия на сегодня исчерпана",
+            )
         return _terminal(
             store,
             order_id,
@@ -325,25 +392,61 @@ def process_open_candidate(
             note=f"fast-path form failed: {str(exc)[:180]}",
         )
 
-    if config.RESPOND_MODE == "commission":
-        # Читаем футер сразу после открытия формы: ставку в commission не
-        # вводим, поэтому «К оплате» уже финален. Нулевого/отсутствующего
-        # to_pay не считаем проблемой — повторная проверка после fill_form.
-        try:
-            early_to_pay = respond_mod.read_footer(order_page).get("to_pay")
-        except Exception:
-            early_to_pay = None
-        if early_to_pay:
+    # После открытия формы считываем безопасную денежную телеметрию ДО LLM.
+    try:
+        early_footer = respond_mod.read_footer(order_page)
+    except Exception:
+        early_footer = {}
+    early_to_pay = _int_or_none(early_footer.get("to_pay"))
+    early_balance = _int_or_none(early_footer.get("balance_seen"))
+    early_balance_confident = early_footer.get("balance_confident") is True
+
+    if config.RESPOND_MODE == "pay":
+        if (
+            early_to_pay is not None
+            and early_to_pay > 0
+            and early_balance is not None
+            and early_balance_confident
+            and early_balance < early_to_pay
+        ):
+            capability.mark(
+                capability.NO_BALANCE,
+                "balance is below the response price",
+                balance_rub=early_balance,
+                to_pay_rub=early_to_pay,
+            )
             return _terminal(
                 store,
                 order_id,
                 send_status="skipped",
                 draft_status="skipped",
                 note=(
-                    "скип до LLM: режим комиссии, а к оплате "
-                    f"{early_to_pay} ₽ — тариф выбран неверно"
+                    "скип до LLM: недостаточно баланса "
+                    f"({early_balance} ₽ < {early_to_pay} ₽)"
                 ),
             )
+    elif early_to_pay:
+        capability.mark(
+            capability.COMMISSION_UNAVAILABLE,
+            "commission mode produced a paid response footer",
+            to_pay_rub=early_to_pay,
+        )
+        return _terminal(
+            store,
+            order_id,
+            send_status="skipped",
+            draft_status="skipped",
+            note=(
+                "скип до LLM: режим комиссии, а к оплате "
+                f"{early_to_pay} ₽ — комиссия не применилась"
+            ),
+        )
+
+    capability.mark_ready(
+        "response form available",
+        balance_rub=early_balance if early_balance_confident else None,
+        to_pay_rub=early_to_pay,
+    )
 
     base_system = system_prompt_factory()
     experiment_system = base_system + outreach_variant_prompt(variant)
@@ -391,20 +494,45 @@ def process_open_candidate(
     except respond_mod.OrderHiddenError as exc:
         return _unavailable(store, order_id, exc, draft_exists=True)
     except respond_mod.CommissionExhaustedError as exc:
-        mark_commission_exhausted()
+        status = _mark_form_capability(exc)
         store.set_send_status(order_id, "skipped")
-        store.set_note(order_id, f"скип: {str(exc)[:160]} — аккаунт до завтра стоит")
+        if status == capability.COMMISSION_DAILY_LIMIT:
+            store.set_note(order_id, f"скип: {str(exc)[:160]} — аккаунт до завтра стоит")
+        else:
+            store.set_note(order_id, "скип: комиссия недоступна для аккаунта")
         return "skipped"
     except Exception as exc:
+        _mark_form_capability(exc)
         store.set_send_status(order_id, "failed")
         store.set_note(order_id, f"fast-path form failed: {str(exc)[:180]}")
         return "failed"
 
     due, why = _payment_due(config.RESPOND_MODE, footer)
     if due is None:
+        if config.RESPOND_MODE == "commission" and "режим комиссии" in why:
+            capability.mark(
+                capability.COMMISSION_UNAVAILABLE,
+                "commission mode produced a paid response footer",
+                to_pay_rub=_int_or_none(footer.get("to_pay")),
+            )
+        elif "не смог прочитать" in why or "не смог распознать" in why:
+            capability.mark_ui_unknown("response footer is not recognized")
         store.set_send_status(order_id, "skipped")
         store.set_note(order_id, f"скип: {why}")
         return "skipped"
+
+    if config.RESPOND_MODE == "pay" and due > 0 and footer.get("balance_confident") is True:
+        final_balance = _int_or_none(footer.get("balance_seen"))
+        if final_balance is not None and final_balance < due:
+            capability.mark(
+                capability.NO_BALANCE,
+                "balance is below the response price",
+                balance_rub=final_balance,
+                to_pay_rub=due,
+            )
+            store.set_send_status(order_id, "skipped")
+            store.set_note(order_id, f"скип: недостаточно баланса ({final_balance} ₽ < {due} ₽)")
+            return "skipped"
 
     if not in_work_hours():
         store.set_send_status(order_id, "skipped")
