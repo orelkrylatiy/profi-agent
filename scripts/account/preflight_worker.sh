@@ -37,12 +37,14 @@ uv run python -m compileall -q src/profi
 
 echo "worker preflight: critical lint"
 uv run ruff check \
+  src/profi/capability.py \
   src/profi/integration/respond.py \
   src/profi/fastpath.py \
   src/profi/main.py
 
 echo "worker preflight: response regressions"
 uv run pytest -q \
+  tests/test_capability.py \
   tests/test_respond_hidden_marker.py \
   tests/test_fast_path.py::TestProcessOpenCandidate::test_order_hidden_at_form_open_skips_before_llm \
   tests/test_fast_path.py::TestProcessOpenCandidate::test_form_open_failure_before_llm_is_terminal_failed \
