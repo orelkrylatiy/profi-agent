@@ -1,7 +1,7 @@
 """Persisted read-only account capability state for the response fast-path.
 
 The worker should keep monitoring the feed even when an account cannot currently
-respond.  This module stores a tiny per-account state file next to the SQLite DB
+respond. This module stores a tiny per-account state file next to the SQLite DB
 so a restart does not immediately hammer the same broken response UI again.
 
 A capability state is deliberately evidence-based:
@@ -95,7 +95,7 @@ def load_state(path: Path | None = None) -> CapabilityState:
             balance_rub=_optional_int(raw.get("balance_rub")),
             to_pay_rub=_optional_int(raw.get("to_pay_rub")),
         )
-    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+    except (OSError, ValueError, TypeError):
         return CapabilityState()
 
 
@@ -158,7 +158,9 @@ def mark_ready(
     )
 
 
-def mark_ui_unknown(reason: str = "response UI is not recognized", *, path: Path | None = None):
+def mark_ui_unknown(
+    reason: str = "response UI is not recognized", *, path: Path | None = None
+) -> CapabilityState:
     return mark(UI_UNKNOWN, reason, ttl_s=ui_unknown_recheck_seconds(), path=path)
 
 
@@ -174,11 +176,13 @@ def mark_commission_daily_limit(reason: str, *, path: Path | None = None) -> Cap
 
 
 def classify_form_error(exc: Exception, mode: str) -> str | None:
-    """Map evidence from response-form failures to an account capability status.
+    """Map response-form evidence to an account capability status.
 
-    ``None`` means the failure is order-specific and must not poison account state.
-    We intentionally classify only specific phrases.  Ambiguous DOM failures become
-    UI_UNKNOWN rather than being guessed as NO_BALANCE.
+    ``None`` means the failure is order-specific and must not poison account
+    state. The historical ``CommissionExhaustedError`` is overloaded by the
+    integration layer: explicit "commission unavailable" wording wins, while
+    other instances of that exception retain the legacy daily-limit meaning.
+    Ambiguous DOM failures become UI_UNKNOWN rather than guessed NO_BALANCE.
     """
     name = type(exc).__name__
     text = " ".join(str(exc).lower().split())
@@ -196,15 +200,6 @@ def classify_form_error(exc: Exception, mode: str) -> str | None:
     if any(marker in text for marker in balance_markers):
         return NO_BALANCE
 
-    daily_limit_markers = (
-        "подождите до завтра",
-        "дневной лимит",
-        "не больше 20 раз в день",
-        "лимит profi исчерпан",
-    )
-    if mode == "commission" and any(marker in text for marker in daily_limit_markers):
-        return COMMISSION_DAILY_LIMIT
-
     commission_unavailable_markers = (
         "нет опции «комиссия»",
         "опция «комиссия» в модалке не найдена",
@@ -214,6 +209,18 @@ def classify_form_error(exc: Exception, mode: str) -> str | None:
     )
     if mode == "commission" and any(marker in text for marker in commission_unavailable_markers):
         return COMMISSION_UNAVAILABLE
+
+    daily_limit_markers = (
+        "подождите до завтра",
+        "дневной лимит",
+        "не больше 20 раз в день",
+        "лимит profi исчерпан",
+    )
+    if mode == "commission" and (
+        any(marker in text for marker in daily_limit_markers)
+        or name == "CommissionExhaustedError"
+    ):
+        return COMMISSION_DAILY_LIMIT
 
     return UI_UNKNOWN
 
