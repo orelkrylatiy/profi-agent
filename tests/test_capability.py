@@ -124,7 +124,7 @@ def test_pay_mode_no_balance_blocks_before_llm(monkeypatch, isolated_capability)
     monkeypatch.setattr(
         fastpath.respond_mod,
         "read_footer",
-        lambda p: {"to_pay": 200, "balance_seen": 0},
+        lambda p: {"to_pay": 200, "balance_seen": 0, "balance_confident": True},
     )
     monkeypatch.setattr(
         fastpath,
@@ -150,6 +150,41 @@ def test_pay_mode_no_balance_blocks_before_llm(monkeypatch, isolated_capability)
     # Current experiment semantics assign a stable arm before the live form probe;
     # the A/B denominator still uses only draft_source='llm' (evaluated).
     assert any(call[0] == "prompt" for call in store.calls)
+
+
+def test_pay_mode_unlabelled_balance_does_not_freeze_account(monkeypatch, isolated_capability):
+    import profi.fastpath as fastpath
+
+    store = _Store()
+    monkeypatch.setattr(fastpath, "in_work_hours", lambda: True)
+    monkeypatch.setattr(fastpath, "commission_paused", lambda: False)
+    monkeypatch.setattr(fastpath.config, "RESPOND_MODE", "pay")
+    monkeypatch.setattr(fastpath.config, "DAILY_SEND_LIMIT", 0)
+    monkeypatch.setattr(fastpath.respond_mod, "_open_respond_form_inner", lambda p, mode: p)
+    monkeypatch.setattr(
+        fastpath.respond_mod,
+        "read_footer",
+        lambda p: {"to_pay": 200, "balance_seen": 0, "balance_confident": False},
+    )
+    monkeypatch.setattr(
+        fastpath,
+        "decide_reply",
+        lambda *a, **k: fastpath.Decision("skip", "test", None, "rules"),
+    )
+
+    result = fastpath.process_open_candidate(
+        object(),
+        object(),
+        store,
+        "94000001",
+        _details(),
+        system_prompt_factory=lambda: "system",
+        user_prompt="order",
+    )
+    assert result == "skipped"
+    state = capability.load_state(isolated_capability)
+    assert state.status == capability.READY
+    assert state.balance_rub is None
 
 
 def test_active_capability_block_skips_response_ui_and_llm(monkeypatch, isolated_capability):
@@ -200,7 +235,7 @@ def test_unknown_response_ui_sets_short_account_cooldown(monkeypatch, isolated_c
     monkeypatch.setattr(fastpath.config, "DAILY_SEND_LIMIT", 0)
 
     def boom(page, mode):
-        raise RuntimeError("нет ни блока тарифов, ни CTA «Написать клиенту»")
+        raise fastpath.respond_mod.RespondError("нет ни блока тарифов, ни CTA «Написать клиенту»")
 
     monkeypatch.setattr(fastpath.respond_mod, "_open_respond_form_inner", boom)
     monkeypatch.setattr(
@@ -220,6 +255,32 @@ def test_unknown_response_ui_sets_short_account_cooldown(monkeypatch, isolated_c
     )
     assert result == "failed"
     assert capability.load_state(isolated_capability).status == capability.UI_UNKNOWN
+
+
+def test_generic_form_failure_is_failed_without_account_cooldown(monkeypatch, isolated_capability):
+    import profi.fastpath as fastpath
+
+    store = _Store()
+    monkeypatch.setattr(fastpath, "in_work_hours", lambda: True)
+    monkeypatch.setattr(fastpath, "commission_paused", lambda: False)
+    monkeypatch.setattr(fastpath.config, "RESPOND_MODE", "pay")
+    monkeypatch.setattr(fastpath.config, "DAILY_SEND_LIMIT", 0)
+
+    def boom(page, mode):
+        raise RuntimeError("temporary network/page failure")
+
+    monkeypatch.setattr(fastpath.respond_mod, "_open_respond_form_inner", boom)
+    monkeypatch.setattr(
+        fastpath,
+        "decide_reply",
+        lambda *a, **k: pytest.fail("LLM must not run after form failure"),
+    )
+    result = fastpath.process_open_candidate(
+        object(), object(), store, "94000001", _details(),
+        system_prompt_factory=lambda: "system", user_prompt="order"
+    )
+    assert result == "failed"
+    assert capability.load_state(isolated_capability).status == capability.UNKNOWN
 
 
 def test_commission_paid_footer_marks_commission_unavailable(monkeypatch, isolated_capability):

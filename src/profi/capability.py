@@ -73,7 +73,7 @@ class CapabilityState:
         return self.status in BLOCKING_STATUSES and self.blocked_until > current
 
     def probe_due(self, now: int | None = None) -> bool:
-        return not self.is_blocked(now)
+        return self.status in BLOCKING_STATUSES and not self.is_blocked(now)
 
     def public_dict(self) -> dict:
         return asdict(self)

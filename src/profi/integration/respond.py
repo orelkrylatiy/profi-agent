@@ -351,10 +351,24 @@ def read_footer(order_page: Page) -> dict:
     m = re.search(r"К оплате:\s*([\d\s\u00a0]+)\s*₽", txt)
     if m:
         out["to_pay"] = int(m.group(1).replace(" ", "").replace("\u00a0", ""))
-    ms = re.findall(r"([\d\s\u00a0]+)\s*₽", txt)
-    if len(ms) >= 2:
-        # футер: «К оплате: N ₽ … <баланс> ₽» — баланс идёт последним
-        out["balance_seen"] = int(ms[-1].replace(" ", "").replace("\u00a0", ""))
+    balance_match = re.search(
+        r"(?:баланс|на\s+балансе|доступно)\s*:?\s*([\d\s\u00a0]+)\s*₽",
+        txt,
+        re.IGNORECASE,
+    )
+    if balance_match:
+        out["balance_seen"] = int(
+            balance_match.group(1).replace(" ", "").replace("\u00a0", "")
+        )
+        out["balance_confident"] = True
+    else:
+        # Legacy UI sometimes exposes two money values without a label. Keep the
+        # value for local diagnostics, but never use this heuristic to freeze an
+        # account as NO_BALANCE.
+        ms = re.findall(r"([\d\s\u00a0]+)\s*₽", txt)
+        if len(ms) >= 2:
+            out["balance_seen"] = int(ms[-1].replace(" ", "").replace("\u00a0", ""))
+            out["balance_confident"] = False
     btn = order_page.get_by_test_id(PAY_BUTTON_TESTID)
     if btn.count() == 0:
         btn = win.get_by_text("Откликнуться", exact=True)

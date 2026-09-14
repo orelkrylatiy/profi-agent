@@ -28,7 +28,13 @@ V1 использует `@mantine/core` + `@mantine/charts` (Recharts). Это �
 
 ## Запуск
 
-Из `dashboard/`:
+Сначала из корня репозитория собери локальный dataset:
+
+```bash
+python scripts/ops/dashboard_export.py
+```
+
+Затем из `dashboard/`:
 
 ```bash
 npm install

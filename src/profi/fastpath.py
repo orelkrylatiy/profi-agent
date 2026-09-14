@@ -399,12 +399,14 @@ def process_open_candidate(
         early_footer = {}
     early_to_pay = _int_or_none(early_footer.get("to_pay"))
     early_balance = _int_or_none(early_footer.get("balance_seen"))
+    early_balance_confident = early_footer.get("balance_confident") is True
 
     if config.RESPOND_MODE == "pay":
         if (
             early_to_pay is not None
             and early_to_pay > 0
             and early_balance is not None
+            and early_balance_confident
             and early_balance < early_to_pay
         ):
             capability.mark(
@@ -442,7 +444,7 @@ def process_open_candidate(
 
     capability.mark_ready(
         "response form available",
-        balance_rub=early_balance,
+        balance_rub=early_balance if early_balance_confident else None,
         to_pay_rub=early_to_pay,
     )
 
@@ -500,6 +502,7 @@ def process_open_candidate(
             store.set_note(order_id, "скип: комиссия недоступна для аккаунта")
         return "skipped"
     except Exception as exc:
+        _mark_form_capability(exc)
         store.set_send_status(order_id, "failed")
         store.set_note(order_id, f"fast-path form failed: {str(exc)[:180]}")
         return "failed"
@@ -517,6 +520,19 @@ def process_open_candidate(
         store.set_send_status(order_id, "skipped")
         store.set_note(order_id, f"скип: {why}")
         return "skipped"
+
+    if config.RESPOND_MODE == "pay" and due > 0 and footer.get("balance_confident") is True:
+        final_balance = _int_or_none(footer.get("balance_seen"))
+        if final_balance is not None and final_balance < due:
+            capability.mark(
+                capability.NO_BALANCE,
+                "balance is below the response price",
+                balance_rub=final_balance,
+                to_pay_rub=due,
+            )
+            store.set_send_status(order_id, "skipped")
+            store.set_note(order_id, f"скип: недостаточно баланса ({final_balance} ₽ < {due} ₽)")
+            return "skipped"
 
     if not in_work_hours():
         store.set_send_status(order_id, "skipped")

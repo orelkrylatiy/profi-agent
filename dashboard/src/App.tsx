@@ -35,6 +35,20 @@ function pct(value: number | null): string {
   return value === null ? '—' : `${compactNumber.format(value)}%`
 }
 
+function wilson95(successes: number, total: number): string {
+  if (total <= 0) return '—'
+  const z = 1.96
+  const p = successes / total
+  const z2 = z * z
+  const denom = 1 + z2 / total
+  const center = (p + z2 / (2 * total)) / denom
+  const margin =
+    (z * Math.sqrt((p * (1 - p) + z2 / (4 * total)) / total)) / denom
+  return `${compactNumber.format(Math.max(0, (center - margin) * 100))}–${compactNumber.format(
+    Math.min(100, (center + margin) * 100),
+  )}%`
+}
+
 function formatTimestamp(value: number): string {
   if (!value) return '—'
   return new Intl.DateTimeFormat('ru-RU', {
@@ -228,7 +242,7 @@ function Overview({ data }: { data: DashboardData }) {
         <KpiCard label="Новые заказы" value={current.feed} hint="увидели в фиде" />
         <KpiCard label="Кандидаты" value={current.candidates} hint="прошли hard filter" />
         <KpiCard label="Отклики" value={current.sends} hint="подтверждённо sent" />
-        <KpiCard label="Ответы" value={current.replies} hint="клиент ответил" />
+        <KpiCard label="Ответы" value={current.replies} hint="ответили по сегодняшнему cohort" />
         <KpiCard label="Инциденты" value={current.incidents} hint="availability clusters" />
       </SimpleGrid>
 
@@ -383,6 +397,7 @@ function Experiments({ rows }: { rows: ExperimentRow[] }) {
                       <Table.Th>Send %</Table.Th>
                       <Table.Th>Reply %</Table.Th>
                       <Table.Th>Yield %</Table.Th>
+                      <Table.Th>95% CI yield</Table.Th>
                       <Table.Th>Сред. ответ</Table.Th>
                     </Table.Tr>
                   </Table.Thead>
@@ -412,6 +427,7 @@ function Experiments({ rows }: { rows: ExperimentRow[] }) {
                         <Table.Td>
                           <Text fw={700}>{pct(row.reply_yield_pct)}</Text>
                         </Table.Td>
+                        <Table.Td>{wilson95(row.replied, row.evaluated)}</Table.Td>
                         <Table.Td>
                           {row.avg_reply_min === null ? '—' : `${row.avg_reply_min} мин`}
                         </Table.Td>
@@ -577,7 +593,8 @@ function Dashboard({
             </Title>
             <Text c="dimmed" size="sm" mt={4}>
               {data.source_date ? `Срез за ${data.source_date}` : 'Дата среза неизвестна'}
-              {data.source_code_revision ? ` · ${data.source_code_revision}` : ''}
+              {data.source_generated_at ? ` · собран ${data.source_generated_at}` : ''}
+              {data.source_code_revision ? ` · ${data.source_code_revision.slice(0, 8)}` : ''}
             </Text>
           </div>
           <Button variant="light" onClick={onRefresh} loading={refreshing}>
@@ -617,8 +634,8 @@ function Dashboard({
         </Tabs>
 
         <Text size="xs" c="dimmed" ta="center" pb="md">
-          Публичный dataset не содержит логины, имена клиентов, тексты сообщений, raw logs,
-          order IDs или точные балансы.
+          Локальный dashboard dataset не содержит логины, имена клиентов, тексты сообщений,
+          raw logs, order IDs или точные балансы и по умолчанию не коммитится в Git.
         </Text>
       </Stack>
     </Container>
@@ -663,8 +680,8 @@ export default function App() {
           <Stack gap="sm">
             <Text size="sm">{error}</Text>
             <Text size="sm" c="dimmed">
-              Ожидаемый источник: {dashboardDataUrl()}. После первого запуска daily_publish
-              появится ops/dashboard.json.
+              Ожидаемый источник: {dashboardDataUrl()}. Сначала запусти
+              python scripts/ops/dashboard_export.py; dataset останется локальным.
             </Text>
             <Group>
               <Button onClick={() => setRefreshKey((key) => key + 1)}>Повторить</Button>
