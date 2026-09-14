@@ -22,13 +22,7 @@ import {
 import { useEffect, useMemo, useState } from 'react'
 
 import { dashboardDataUrl, loadDashboardData } from './data'
-import type {
-  Account,
-  CapabilityStatus,
-  DashboardData,
-  ExperimentRow,
-  HistoryRow,
-} from './types'
+import type { Account, DashboardData, ExperimentRow, HistoryRow } from './types'
 
 const compactNumber = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 })
 const integerNumber = new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 })
@@ -117,7 +111,11 @@ function AccountCard({ account }: { account: Account }) {
           <div>
             <Text fw={700}>{account.label}</Text>
             <Text size="xs" c="dimmed">
-              {capability.respond_mode === 'commission' ? 'Комиссия' : capability.respond_mode === 'pay' ? 'Платный отклик' : 'Режим не определён'}
+              {capability.respond_mode === 'commission'
+                ? 'Комиссия'
+                : capability.respond_mode === 'pay'
+                  ? 'Платный отклик'
+                  : 'Режим не определён'}
             </Text>
           </div>
           <Badge color={capabilityColor(capability.status)} variant="light" size="lg">
@@ -151,23 +149,33 @@ function AccountCard({ account }: { account: Account }) {
 
         <SimpleGrid cols={3} spacing="xs">
           <div>
-            <Text size="xs" c="dimmed">Кандидаты</Text>
+            <Text size="xs" c="dimmed">
+              Кандидаты
+            </Text>
             <Text fw={700}>{candidates}</Text>
           </div>
           <div>
-            <Text size="xs" c="dimmed">Отправлено</Text>
+            <Text size="xs" c="dimmed">
+              Отправлено
+            </Text>
             <Text fw={700}>{sends}</Text>
           </div>
           <div>
-            <Text size="xs" c="dimmed">Инциденты</Text>
+            <Text size="xs" c="dimmed">
+              Инциденты
+            </Text>
             <Text fw={700}>{metrics.runtime.availability_incidents}</Text>
           </div>
         </SimpleGrid>
 
         <div>
           <Group justify="space-between" mb={5}>
-            <Text size="xs" c="dimmed">candidate → sent</Text>
-            <Text size="xs" fw={600}>{compactNumber.format(conversion)}%</Text>
+            <Text size="xs" c="dimmed">
+              candidate → sent
+            </Text>
+            <Text size="xs" fw={600}>
+              {compactNumber.format(conversion)}%
+            </Text>
           </Group>
           <Progress value={Math.min(100, conversion)} size="sm" radius="xl" />
         </div>
@@ -214,7 +222,9 @@ function Overview({ data }: { data: DashboardData }) {
           <Group justify="space-between" mb="md">
             <div>
               <Text fw={700}>Динамика за период</Text>
-              <Text size="xs" c="dimmed">Фид, кандидаты и подтверждённые отправки</Text>
+              <Text size="xs" c="dimmed">
+                Фид, кандидаты и подтверждённые отправки
+              </Text>
             </div>
             <Badge variant="light">{data.history.length} дней</Badge>
           </Group>
@@ -238,7 +248,9 @@ function Overview({ data }: { data: DashboardData }) {
 
         <Card radius="lg" padding="lg" withBorder>
           <Text fw={700}>Воронка сегодня</Text>
-          <Text size="xs" c="dimmed" mb="md">Где именно теряются подходящие заказы</Text>
+          <Text size="xs" c="dimmed" mb="md">
+            Где именно теряются подходящие заказы
+          </Text>
           <BarChart
             h={300}
             data={funnelData}
@@ -254,7 +266,9 @@ function Overview({ data }: { data: DashboardData }) {
         <Group justify="space-between" mb="sm">
           <div>
             <Title order={3}>Аккаунты</Title>
-            <Text size="sm" c="dimmed">Capability показывает не «жив ли worker», а может ли аккаунт сейчас откликаться.</Text>
+            <Text size="sm" c="dimmed">
+              Capability показывает не «жив ли worker», а может ли аккаунт сейчас откликаться.
+            </Text>
           </div>
         </Group>
         {data.accounts.length > 0 ? (
@@ -265,7 +279,8 @@ function Overview({ data }: { data: DashboardData }) {
           </SimpleGrid>
         ) : (
           <Alert color="gray" title="Нет аккаунтов в dashboard dataset">
-            Collector публикует только явно настроенные аккаунты и не угадывает их по случайным SQLite-файлам.
+            Collector публикует только явно настроенные аккаунты и не угадывает их по случайным
+            SQLite-файлам.
           </Alert>
         )}
       </div>
@@ -291,7 +306,8 @@ function Experiments({ rows }: { rows: ExperimentRow[] }) {
   if (rows.length === 0) {
     return (
       <Alert title="A/B/C данные ещё не накоплены" color="gray">
-        После первых LLM-evaluated кандидатов здесь появятся варианты, send rate, reply rate и основной acquisition yield.
+        После первых LLM-evaluated кандидатов здесь появятся варианты, send rate, reply rate и
+        основной acquisition yield.
       </Alert>
     )
   }
@@ -306,9 +322,13 @@ function Experiments({ rows }: { rows: ExperimentRow[] }) {
             <Group justify="space-between">
               <div>
                 <Title order={3}>{experiment}</Title>
-                <Text size="sm" c="dimmed">Основная метрика: replies / LLM-evaluated candidates (yield)</Text>
+                <Text size="sm" c="dimmed">
+                  Основная метрика: replies / LLM-evaluated candidates (yield)
+                </Text>
               </div>
-              <Badge variant="outline">{sum(experimentRows.map((row) => row.evaluated))} evaluated</Badge>
+              <Badge variant="outline">
+                {sum(experimentRows.map((row) => row.evaluated))} evaluated
+              </Badge>
             </Group>
 
             <Card radius="lg" padding="lg" withBorder>
@@ -316,7 +336,6 @@ function Experiments({ rows }: { rows: ExperimentRow[] }) {
                 h={320}
                 data={chartRows}
                 dataKey="variant"
-                type="grouped"
                 withLegend
                 yAxisProps={{ domain: [0, 100] }}
                 valueFormatter={(value) => `${value}%`}
@@ -330,7 +349,13 @@ function Experiments({ rows }: { rows: ExperimentRow[] }) {
 
             <Card radius="lg" padding={0} withBorder>
               <ScrollArea>
-                <Table striped highlightOnHover horizontalSpacing="lg" verticalSpacing="sm" miw={900}>
+                <Table
+                  striped
+                  highlightOnHover
+                  horizontalSpacing="lg"
+                  verticalSpacing="sm"
+                  miw={900}
+                >
                   <Table.Thead>
                     <Table.Tr>
                       <Table.Th>Аккаунт</Table.Th>
@@ -350,12 +375,18 @@ function Experiments({ rows }: { rows: ExperimentRow[] }) {
                     {experimentRows.map((row) => (
                       <Table.Tr key={`${row.account_id}-${row.prompt_variant}`}>
                         <Table.Td>{row.account_id}</Table.Td>
-                        <Table.Td><Badge variant="light">{row.prompt_variant}</Badge></Table.Td>
+                        <Table.Td>
+                          <Badge variant="light">{row.prompt_variant}</Badge>
+                        </Table.Td>
                         <Table.Td>{row.assigned}</Table.Td>
                         <Table.Td>
                           <Group gap="xs" wrap="nowrap">
                             <Text size="sm">{row.evaluated}</Text>
-                            {row.evaluated < 30 && <Badge size="xs" color="yellow" variant="light">мало данных</Badge>}
+                            {row.evaluated < 30 && (
+                              <Badge size="xs" color="yellow" variant="light">
+                                мало данных
+                              </Badge>
+                            )}
                           </Group>
                         </Table.Td>
                         <Table.Td>{row.fallbacks}</Table.Td>
@@ -363,8 +394,12 @@ function Experiments({ rows }: { rows: ExperimentRow[] }) {
                         <Table.Td>{row.replied}</Table.Td>
                         <Table.Td>{pct(row.send_rate_pct)}</Table.Td>
                         <Table.Td>{pct(row.reply_rate_pct)}</Table.Td>
-                        <Table.Td><Text fw={700}>{pct(row.reply_yield_pct)}</Text></Table.Td>
-                        <Table.Td>{row.avg_reply_min === null ? '—' : `${row.avg_reply_min} мин`}</Table.Td>
+                        <Table.Td>
+                          <Text fw={700}>{pct(row.reply_yield_pct)}</Text>
+                        </Table.Td>
+                        <Table.Td>
+                          {row.avg_reply_min === null ? '—' : `${row.avg_reply_min} мин`}
+                        </Table.Td>
                       </Table.Tr>
                     ))}
                   </Table.Tbody>
@@ -385,20 +420,24 @@ function Reliability({ accounts, history }: { accounts: Account[]; history: Hist
     failed: row.responses_failed,
   }))
 
-  const eventRows = accounts.flatMap((account) =>
-    Object.entries(account.metrics.runtime.events).map(([event, count]) => ({
-      account: account.label,
-      event,
-      count,
-    })),
-  ).sort((a, b) => b.count - a.count)
+  const eventRows = accounts
+    .flatMap((account) =>
+      Object.entries(account.metrics.runtime.events).map(([event, count]) => ({
+        account: account.label,
+        event,
+        count,
+      })),
+    )
+    .sort((a, b) => b.count - a.count)
 
   return (
     <Stack gap="lg">
       <SimpleGrid cols={{ base: 1, lg: 2 }} spacing="lg">
         <Card radius="lg" padding="lg" withBorder>
           <Text fw={700}>Availability и failed</Text>
-          <Text size="xs" c="dimmed" mb="md">Важно различать независимые инциденты и outcomes кандидатов</Text>
+          <Text size="xs" c="dimmed" mb="md">
+            Важно различать независимые инциденты и outcomes кандидатов
+          </Text>
           {incidentData.length ? (
             <AreaChart
               h={300}
@@ -417,21 +456,31 @@ function Reliability({ accounts, history }: { accounts: Account[]; history: Hist
 
         <Card radius="lg" padding="lg" withBorder>
           <Text fw={700}>Технические события сегодня</Text>
-          <Text size="xs" c="dimmed" mb="md">Сортировка по количеству в canonical logs</Text>
+          <Text size="xs" c="dimmed" mb="md">
+            Сортировка по количеству в canonical logs
+          </Text>
           {eventRows.length ? (
             <Stack gap="xs">
               {eventRows.slice(0, 10).map((row) => (
                 <Group key={`${row.account}-${row.event}`} justify="space-between">
                   <div>
-                    <Text size="sm" fw={600}>{row.event}</Text>
-                    <Text size="xs" c="dimmed">{row.account}</Text>
+                    <Text size="sm" fw={600}>
+                      {row.event}
+                    </Text>
+                    <Text size="xs" c="dimmed">
+                      {row.account}
+                    </Text>
                   </div>
-                  <Badge variant="light" color={row.count > 10 ? 'red' : 'gray'}>{row.count}</Badge>
+                  <Badge variant="light" color={row.count > 10 ? 'red' : 'gray'}>
+                    {row.count}
+                  </Badge>
                 </Group>
               ))}
             </Stack>
           ) : (
-            <Text size="sm" c="dimmed">Событий нет.</Text>
+            <Text size="sm" c="dimmed">
+              Событий нет.
+            </Text>
           )}
         </Card>
       </SimpleGrid>
@@ -459,7 +508,9 @@ function Reliability({ accounts, history }: { accounts: Account[]; history: Hist
                       {capabilityLabel(account.capability.status)}
                     </Badge>
                   </Table.Td>
-                  <Table.Td>{account.metrics.runtime.worker_seen_today ? 'виден' : 'не виден'}</Table.Td>
+                  <Table.Td>
+                    {account.metrics.runtime.worker_seen_today ? 'виден' : 'не виден'}
+                  </Table.Td>
                   <Table.Td>{account.metrics.runtime.last_seen_at || '—'}</Table.Td>
                   <Table.Td>{account.metrics.runtime.availability_incidents}</Table.Td>
                   <Table.Td>{account.metrics.inventory.details_errors}</Table.Td>
@@ -477,28 +528,46 @@ function Reliability({ accounts, history }: { accounts: Account[]; history: Hist
 function EmptyChart({ text }: { text: string }) {
   return (
     <div className="empty-chart">
-      <Text size="sm" c="dimmed">{text}</Text>
+      <Text size="sm" c="dimmed">
+        {text}
+      </Text>
     </div>
   )
 }
 
-function Dashboard({ data, onRefresh, refreshing }: { data: DashboardData; onRefresh: () => void; refreshing: boolean }) {
+function Dashboard({
+  data,
+  onRefresh,
+  refreshing,
+}: {
+  data: DashboardData
+  onRefresh: () => void
+  refreshing: boolean
+}) {
   return (
     <Container size="xl" py={{ base: 'md', md: 'xl' }}>
       <Stack gap="xl">
         <Group justify="space-between" align="flex-start">
           <div>
             <Group gap="xs" mb={6}>
-              <Badge variant="light" color="indigo">Profi Agent</Badge>
-              <Badge variant="dot" color="teal">privacy-safe</Badge>
+              <Badge variant="light" color="indigo">
+                Profi Agent
+              </Badge>
+              <Badge variant="dot" color="teal">
+                privacy-safe
+              </Badge>
             </Group>
-            <Title order={1} className="page-title">Analytics & Experiments</Title>
+            <Title order={1} className="page-title">
+              Analytics & Experiments
+            </Title>
             <Text c="dimmed" size="sm" mt={4}>
               {data.source_date ? `Срез за ${data.source_date}` : 'Дата среза неизвестна'}
               {data.source_code_revision ? ` · ${data.source_code_revision}` : ''}
             </Text>
           </div>
-          <Button variant="light" onClick={onRefresh} loading={refreshing}>Обновить</Button>
+          <Button variant="light" onClick={onRefresh} loading={refreshing}>
+            Обновить
+          </Button>
         </Group>
 
         <Divider />
@@ -510,13 +579,20 @@ function Dashboard({ data, onRefresh, refreshing }: { data: DashboardData; onRef
             <Tabs.Tab value="reliability">Надёжность</Tabs.Tab>
           </Tabs.List>
 
-          <Tabs.Panel value="overview"><Overview data={data} /></Tabs.Panel>
-          <Tabs.Panel value="experiments"><Experiments rows={data.experiments} /></Tabs.Panel>
-          <Tabs.Panel value="reliability"><Reliability accounts={data.accounts} history={data.history} /></Tabs.Panel>
+          <Tabs.Panel value="overview">
+            <Overview data={data} />
+          </Tabs.Panel>
+          <Tabs.Panel value="experiments">
+            <Experiments rows={data.experiments} />
+          </Tabs.Panel>
+          <Tabs.Panel value="reliability">
+            <Reliability accounts={data.accounts} history={data.history} />
+          </Tabs.Panel>
         </Tabs>
 
         <Text size="xs" c="dimmed" ta="center" pb="md">
-          Публичный dataset не содержит логины, имена клиентов, тексты сообщений, raw logs, order IDs или точные балансы.
+          Публичный dataset не содержит логины, имена клиентов, тексты сообщений, raw logs,
+          order IDs или точные балансы.
         </Text>
       </Stack>
     </Container>
@@ -561,9 +637,12 @@ export default function App() {
           <Stack gap="sm">
             <Text size="sm">{error}</Text>
             <Text size="sm" c="dimmed">
-              Ожидаемый источник: {dashboardDataUrl()}. После первого запуска daily_publish появится ops/dashboard.json.
+              Ожидаемый источник: {dashboardDataUrl()}. После первого запуска daily_publish
+              появится ops/dashboard.json.
             </Text>
-            <Group><Button onClick={() => setRefreshKey((key) => key + 1)}>Повторить</Button></Group>
+            <Group>
+              <Button onClick={() => setRefreshKey((key) => key + 1)}>Повторить</Button>
+            </Group>
           </Stack>
         </Alert>
       </Container>
