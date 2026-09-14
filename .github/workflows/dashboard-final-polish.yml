@@ -1,0 +1,124 @@
+name: Dashboard final polish
+
+on:
+  push:
+    branches:
+      - feature/capability-dashboard-v1
+
+permissions:
+  contents: write
+
+jobs:
+  polish:
+    if: ${{ !contains(github.event.head_commit.message, '[dashboard-polish]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/capability-dashboard-v1
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Apply dashboard UX and contract fixes
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace(path: str, old: str, new: str, count: int = 1) -> None:
+              p = Path(path)
+              text = p.read_text(encoding="utf-8")
+              actual = text.count(old)
+              if actual < count:
+                  raise SystemExit(f"{path}: expected at least {count} occurrence(s), found {actual}")
+              p.write_text(text.replace(old, new, count), encoding="utf-8")
+
+          replace(
+              "dashboard/src/data.ts",
+              """  if (!Array.isArray(data.accounts) || !Array.isArray(data.history) || !Array.isArray(data.experiments)) {\n    throw new Error('dashboard data: malformed collections')\n  }\n  return data as DashboardData\n}\n""",
+              """  if (!Array.isArray(data.accounts) || !Array.isArray(data.history) || !Array.isArray(data.experiments)) {\n    throw new Error('dashboard data: malformed collections')\n  }\n  if (\n    typeof data.generated_at !== 'string' ||\n    !data.data_quality ||\n    !Array.isArray(data.data_quality.warnings)\n  ) {\n    throw new Error('dashboard data: malformed metadata')\n  }\n  return data as DashboardData\n}\n\nexport function snapshotAgeMinutes(data: DashboardData, nowMs = Date.now()): number | null {\n  const source = data.source_generated_at || data.generated_at\n  const parsed = Date.parse(source)\n  if (!Number.isFinite(parsed)) return null\n  return Math.max(0, (nowMs - parsed) / 60_000)\n}\n""",
+          )
+
+          replace(
+              "dashboard/src/data.test.ts",
+              "import { loadDashboardData, validateDashboardData } from './data'\n",
+              "import { loadDashboardData, snapshotAgeMinutes, validateDashboardData } from './data'\n",
+          )
+          replace(
+              "dashboard/src/data.test.ts",
+              """  it('loads a valid v2 payload through fetch', async () => {\n""",
+              """  it('rejects malformed metadata before React can render it', () => {\n    expect(() => validateDashboardData({ ...payload, data_quality: undefined })).toThrow(\n      /malformed metadata/,\n    )\n  })\n\n  it('computes freshness from the source snapshot timestamp', () => {\n    expect(snapshotAgeMinutes(payload, Date.parse('2026-09-14T07:14:00Z'))).toBeCloseTo(15, 5)\n  })\n\n  it('loads a valid v2 payload through fetch', async () => {\n""",
+          )
+
+          replace(
+              "dashboard/src/App.tsx",
+              "import { dashboardDataUrl, loadDashboardData } from './data'\n",
+              "import { dashboardDataUrl, loadDashboardData, snapshotAgeMinutes } from './data'\n",
+          )
+          replace(
+              "dashboard/src/App.tsx",
+              """        <KpiCard label=\"Ответы\" value={current.replies} hint=\"ответили по сегодняшнему cohort\" />\n""",
+              """        <KpiCard\n          label=\"Ответы\"\n          value={current.replies}\n          hint={data.source_date ? `cohort ${data.source_date}` : 'cohort среза'}\n        />\n""",
+          )
+          replace(
+              "dashboard/src/App.tsx",
+              """          <Text fw={700}>Воронка сегодня</Text>\n          <Text size=\"xs\" c=\"dimmed\" mb=\"md\">\n            Cohort заказов, впервые увиденных сегодня — без смешивания с event-счётчиками\n          </Text>\n""",
+              """          <Text fw={700}>Воронка cohort · {data.source_date || 'текущий срез'}</Text>\n          <Text size=\"xs\" c=\"dimmed\" mb=\"md\">\n            Заказы, впервые увиденные в дату среза — без смешивания с event-счётчиками\n          </Text>\n""",
+          )
+          replace(
+              "dashboard/src/App.tsx",
+              """function experimentChartRows(rows: ExperimentRow[]) {\n  return rows.map((row) => ({\n    variant: `${row.account_id} · ${row.prompt_variant}`,\n    send_rate: row.send_rate_pct || 0,\n    reply_rate: row.reply_rate_pct || 0,\n    reply_yield: row.reply_yield_pct || 0,\n  }))\n}\n""",
+              """function experimentChartRows(rows: ExperimentRow[]) {\n  return rows\n    .filter((row) => row.evaluated > 0)\n    .map((row) => ({\n      variant: `${row.account_id} · ${row.prompt_variant}`,\n      send_rate: row.send_rate_pct ?? 0,\n      reply_yield: row.reply_yield_pct ?? 0,\n    }))\n}\n""",
+          )
+          replace(
+              "dashboard/src/App.tsx",
+              """            <Card radius=\"lg\" padding=\"lg\" withBorder>\n              <BarChart\n                h={320}\n                data={chartRows}\n                dataKey=\"variant\"\n                withLegend\n                yAxisProps={{ domain: [0, 100] }}\n                valueFormatter={(value) => `${value}%`}\n                series={[\n                  { name: 'reply_yield', label: 'Yield', color: 'teal.6' },\n                  { name: 'send_rate', label: 'Send rate', color: 'indigo.6' },\n                  { name: 'reply_rate', label: 'Reply rate', color: 'grape.6' },\n                ]}\n              />\n            </Card>\n""",
+              """            <Card radius=\"lg\" padding=\"lg\" withBorder>\n              {chartRows.length > 0 ? (\n                <BarChart\n                  h={320}\n                  data={chartRows}\n                  dataKey=\"variant\"\n                  withLegend\n                  yAxisProps={{ domain: [0, 100] }}\n                  valueFormatter={(value) => `${value}%`}\n                  series={[\n                    { name: 'reply_yield', label: 'Yield', color: 'teal.6' },\n                    { name: 'send_rate', label: 'Send rate', color: 'indigo.6' },\n                  ]}\n                />\n              ) : (\n                <EmptyChart text=\"Нет LLM-evaluated выборки для графика\" />\n              )}\n            </Card>\n""",
+          )
+          replace(
+              "dashboard/src/App.tsx",
+              """}) {\n  return (\n    <Container size=\"xl\" py={{ base: 'md', md: 'xl' }}>\n""",
+              """}) {\n  const ageMinutes = snapshotAgeMinutes(data)\n  const stale = ageMinutes !== null && ageMinutes > 15\n\n  return (\n    <Container size=\"xl\" py={{ base: 'md', md: 'xl' }}>\n""",
+              1,
+          )
+          replace(
+              "dashboard/src/App.tsx",
+              """          <Button variant=\"light\" onClick={onRefresh} loading={refreshing}>\n            Обновить\n          </Button>\n""",
+              """          <Button variant=\"light\" onClick={onRefresh} loading={refreshing}>\n            Перечитать срез\n          </Button>\n""",
+          )
+          replace(
+              "dashboard/src/App.tsx",
+              """        {(data.data_quality.warnings.length > 0 || !data.source_generated_at) && (\n          <Alert color=\"yellow\" title=\"Проверь свежесть данных\">\n            {data.source_generated_at\n              ? `Исходный ops-срез: ${data.source_generated_at}. `\n              : 'У исходного ops-среза нет времени генерации. '}\n            {data.data_quality.warnings.length > 0\n              ? `Data quality: ${data.data_quality.warnings.join(', ')}`\n              : ''}\n          </Alert>\n        )}\n""",
+              """        {(stale || data.data_quality.warnings.length > 0 || !data.source_generated_at) && (\n          <Alert color={stale ? 'orange' : 'yellow'} title=\"Проверь свежесть данных\">\n            {data.source_generated_at\n              ? `Исходный ops-срез: ${data.source_generated_at}. `\n              : 'У исходного ops-среза нет времени генерации. '}\n            {stale && ageMinutes !== null ? `Возраст данных: ${Math.round(ageMinutes)} мин. ` : ''}\n            {data.data_quality.warnings.length > 0\n              ? `Data quality: ${data.data_quality.warnings.join(', ')}`\n              : ''}\n          </Alert>\n        )}\n""",
+          )
+
+          Path("dashboard/README.md").write_text(
+              """# Profi Agent Dashboard\n\nЛокальная/внутренняя визуализация поверх privacy-safe `dashboard/public/ops/dashboard.json`.\nDashboard ничего не знает о cookies, логинах Profi, order ids, именах клиентов или raw logs.\n\n## Что показывает\n\n- **Обзор** — новые заказы, кандидаты, отправки, ответы, availability incidents, воронка и тренд.\n- **Аккаунты** — health worker-а отдельно от live capability отклика (`READY`, `NO_BALANCE`, `COMMISSION_UNAVAILABLE`, `COMMISSION_DAILY_LIMIT`, `UI_UNKNOWN`).\n- **A/B тесты** — assigned/evaluated/fallback/sent/replied, send rate, reply rate и основной `reply yield`.\n- **Надёжность** — availability incidents, failed outcomes, canonical runtime events и накопившиеся ошибки state inventory.\n\n## Почему Mantine\n\nV1 использует `@mantine/core` + `@mantine/charts` (Recharts). Это даёт единый набор готовых компонентов, charts, responsive layout, dark theme и accessibility без отдельной Tailwind-инфраструктуры в Python-репозитории. Если продуктовый UI позже потребует полного контроля над каждым компонентом, можно перейти/добавить shadcn/ui; если графики станут существенно сложнее — отдельно рассмотреть Apache ECharts.\n\n## Данные\n\n`scripts/ops/dashboard_export.py` строит `dashboard/public/ops/dashboard.json` из:\n\n1. `ops/latest.json` и `ops/daily/*.json` — агрегированный ops-срез и история;\n2. локальных account SQLite DB — только агрегаты `v_prompt_experiments`;\n3. локальных `data/<account>.capability.json` — только публичное состояние capability.\n\nПубликуемые аккаунты получают псевдонимы `account_1`, `account_2`, ... . Точный баланс и стоимость отклика остаются только локально; dashboard получает лишь `balance_known` / `price_known`.\n\n`daily_publish.sh` обновляет локальный dataset вместе с дневным snapshot, но не добавляет dashboard dataset в Git. Кнопка **«Перечитать срез»** только повторно загружает уже сгенерированный JSON и не запускает Python collector. Поэтому UI явно предупреждает, если source snapshot старше 15 минут. Для почти live режима запускай exporter по cron/Task Scheduler с нужной частотой; для удалённого доступа раздавай dataset только приватно.\n\n## Запуск\n\nСначала из корня репозитория собери локальный dataset:\n\n```bash\npython scripts/ops/dashboard_export.py\n```\n\nЗатем из `dashboard/`:\n\n```bash\nnpm ci\nnpm run dev\n```\n\nПо умолчанию frontend запрашивает dataset относительно Vite base (`ops/dashboard.json`). Для отдельного хостинга можно задать:\n\n```bash\nVITE_DASHBOARD_DATA_URL=https://example.internal/ops/dashboard.json npm run build\n```\n\nДля статического production build dataset нужно раздавать рядом с приложением (например, `dist/ops/dashboard.json`) либо задавать `VITE_DASHBOARD_DATA_URL`.\n\n## Сборка\n\n```bash\nnpm run build\n```\n\nСборка и data-contract tests проверяются отдельным `dashboard-build` job в GitHub Actions.\n""",
+              encoding="utf-8",
+          )
+
+          replace(
+              ".github/workflows/ci.yml",
+              "        run: npm install --no-audit --no-fund\n",
+              "        run: npm ci --no-audit --no-fund\n",
+          )
+          PY
+
+      - name: Create lockfile and validate dashboard
+        working-directory: dashboard
+        run: |
+          npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+          npm ci --no-audit --no-fund
+          npm test
+          npm run build
+
+      - name: Commit polish
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/workflows/ci.yml dashboard
+          git commit -m "fix: clarify dashboard freshness and reproducible build [dashboard-polish]"
+          git push origin HEAD:feature/capability-dashboard-v1
