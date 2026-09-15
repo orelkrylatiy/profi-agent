@@ -105,6 +105,31 @@ def test_long_texts_and_last_text_cleanup():
     assert row["last_text"].endswith("английский )")
 
 
+def test_two_word_name_with_robot_marker():
+    # Инцидент 15.09: «Макарова Юлия Робот: Ответьте на предложение клиента» —
+    # раньше name='Макарова', маркер после второго слова не находили,
+    # диалог ошибочно считался «клиент написал» и вешал чат-чек на 30 с.
+    row = classify_dialog_row("Макарова Юлия Робот: Ответьте на предложение клиента 1")
+    assert row["name"] == "Макарова Юлия"
+    assert row["who_last"] == "system"
+    assert row["last_is_ours"] is False
+    assert row["unread"] == 1
+    assert row["last_text"].startswith("Ответьте на предложение")
+
+
+def test_two_word_name_with_ours_marker():
+    row = classify_dialog_row("Наталья Гольцева Вы: Помогу Еве подтянуть английский 0")
+    assert row["name"] == "Наталья Гольцева"
+    assert row["who_last"] == "ours"
+
+
+def test_client_message_without_marker_still_first_word():
+    row = classify_dialog_row("Ольга Петровна Здравствуйте, когда можем начать? 3")
+    assert row["name"] == "Ольга"  # без маркера имя не отделить — как раньше
+    assert row["who_last"] == "client"
+    assert row["unread"] == 3
+
+
 # --- Store.chat_tutor_streak: лимит догонялок ---
 
 
@@ -248,3 +273,56 @@ def test_stale_unanswered_message_not_retried(tmp_path):
     )
     store.conn.commit()
     assert not _target(store, "Усмонали Максим Ты в каком городе 0")
+
+
+# --- open_dialog_by_name: фолбэк клика по подстроке ---
+
+
+class _FakeLocator:
+    def __init__(self, matches):
+        self._matches = matches  # сколько узлов нашёл этот локатор
+        self.clicked = False
+
+    def count(self):
+        return self._matches
+
+    @property
+    def first(self):
+        return self
+
+    def click(self, **kwargs):
+        del kwargs
+        self.clicked = True
+
+
+class _FakeChatPage:
+    def __init__(self, exact_matches, substring_matches):
+        self.url = "https://profi.ru/backoffice/r.php?c=9&id=93900123"
+        self._locators = {
+            True: _FakeLocator(exact_matches),
+            False: _FakeLocator(substring_matches),
+        }
+
+    def get_by_text(self, name, exact=True):
+        del name
+        return self._locators[exact]
+
+    def wait_for_timeout(self, ms):
+        del ms
+
+
+def test_open_dialog_falls_back_to_substring_when_exact_misses():
+    from profi.integration.chat import open_dialog_by_name
+
+    page = _FakeChatPage(exact_matches=0, substring_matches=1)
+    assert open_dialog_by_name(page, "Макарова") == "93900123"
+    assert page._locators[False].clicked, "должен кликнуть substring-локатор"
+
+
+def test_open_dialog_prefers_exact_match():
+    from profi.integration.chat import open_dialog_by_name
+
+    page = _FakeChatPage(exact_matches=1, substring_matches=5)
+    assert open_dialog_by_name(page, "Вита") == "93900123"
+    assert page._locators[True].clicked
+    assert not page._locators[False].clicked, "exact нашёлся — substring не трогаем"

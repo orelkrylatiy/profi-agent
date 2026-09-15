@@ -69,7 +69,7 @@ def open_chats(page: Page) -> None:
 #     отвечай» и писал снова и снова);
 #   «{имя} {текст} N»  — последнее сообщение клиента;
 # N в конце — счётчик непрочитанных (в DOM это отдельный элемент).
-_DIALOG_ROW_RE = re.compile(r"^(?P<name>\S+)(?:\s+(?P<who>Вы|Робот):)?\s*(?P<rest>.*)$")
+# Имя может быть из двух слов — разбор в classify_dialog_row.
 
 
 def classify_dialog_row(t: str) -> dict:
@@ -78,16 +78,28 @@ def classify_dialog_row(t: str) -> dict:
     Возвращает name, unread, who_last ('ours'|'system'|'client'),
     last_is_ours, preview и last_text (текст последнего сообщения без
     префикса имени/«Вы:» и без счётчика непрочитанных).
+
+    Имя — всё до ПЕРВОГО маркера «Вы:»/«Робот:»: имена бывают из двух
+    слов («Макарова Юлия», инцидент 15.09 — раньше брали первое слово,
+    маркер после второго не находили, диалог считался «клиент написал»
+    и вешал чат-чек на 30 с таймаута клика каждый цикл). Без маркера —
+    первое слово, как раньше.
     """
     t = t.strip()
-    m = _DIALOG_ROW_RE.match(t)
-    name = m.group("name") if m else (t.split(" ", 1)[0] if t else "")
-    who = "client"
-    if m and m.group("who"):
-        who = "ours" if m.group("who") == "Вы" else "system"
-    um = re.search(r"\s(\d{1,3})\s*$", t)
+    mm = re.search(r"\s(?P<who>Вы|Робот):", t)
+    if mm:
+        name = t[: mm.start()].strip()
+        who = "ours" if mm.group("who") == "Вы" else "system"
+        rest = t[mm.end() :].strip()
+    else:
+        # без маркера имя не отделить от текста — первое слово, как раньше
+        name = t.split(" ", 1)[0] if t else ""
+        who = "client"
+        rest = t.split(" ", 1)[1] if " " in t else ""
+    if not name:
+        name = t.split(" ", 1)[0] if t else ""
+    um = re.search(r"\s(\d{1,3})\s*$", rest)
     unread = int(um.group(1)) if um else 0
-    rest = (m.group("rest") if m else "").strip()
     last_text = re.sub(r"\s+\d{1,3}\s*$", "", rest).strip()
     return {
         "name": name,
@@ -121,8 +133,19 @@ def list_dialogs(page: Page) -> list[dict]:
 
 
 def open_dialog_by_name(page: Page, name: str) -> str:
-    """Клик по строке диалога; возвращает order_id из URL (или '')."""
-    page.get_by_text(name, exact=True).first.click(delay=random.randint(60, 120))
+    """Клик по строке диалога; возвращает order_id из URL (или '').
+
+    exact=True — основной путь. Фолбэк на подстроку: DOM-узел может держать
+    имя целиком («Макарова Юлия»), а в name попало только первое слово —
+    точный клик тогда вешает цикл на 30 с (инцидент 15.09).
+    """
+    loc = page.get_by_text(name, exact=True)
+    try:
+        if loc.count() == 0:
+            loc = page.get_by_text(name, exact=False)
+    except Exception:
+        pass
+    loc.first.click(delay=random.randint(60, 120))
     page.wait_for_timeout(3000)
     m = re.search(r"[?&]id=(\d+)", page.url)
     return m.group(1) if m else ""
