@@ -8,6 +8,8 @@ SQLite remains the durable state/idempotency and experiment layer.
 from __future__ import annotations
 
 import hashlib
+import os
+import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
@@ -48,6 +50,51 @@ def mark_commission_exhausted() -> None:
         config.COMMISSION_EXHAUSTED_FILE.write_text(
             business_now().date().isoformat(), encoding="utf-8"
         )
+    except OSError:
+        pass
+
+
+def cross_account_claim(order_id: str) -> bool:
+    """Атомарный claim заказа на уровне машины (data/ одна на все акки).
+
+    Инфо и profi3 — оба информатика, гонялись за одними свежими заказами
+    и отвечали дважды с разницей в 1–2 минуты: двойной расход комиссионной
+    квоты и два почти одинаковых отклика одному клиенту. True — мы первые,
+    маркер поставлен; False — другой аккаунт уже взял заказ. Маркер обязаны
+    снимать cross_account_release() на всех путях без отправки.
+    """
+    d = config.CROSS_ACCOUNT_DIR
+    try:
+        d.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return True  # нет папки — работаем без кросс-акковой защиты
+    path = d / f"{order_id}.claim"
+    try:
+        fd = os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        os.write(fd, (config.LOG_TAG or "unknown").encode("utf-8"))
+        os.close(fd)
+        return True
+    except FileExistsError:
+        try:
+            age = time.time() - path.stat().st_mtime
+        except OSError:
+            return False
+        if age > config.CROSS_ACCOUNT_CLAIM_TTL_S:
+            # воркер умер посреди обработки — протухший claim не держит заказ
+            try:
+                path.unlink()
+                return cross_account_claim(order_id)
+            except OSError:
+                return False
+        return False
+    except OSError:
+        return True  # FS капризничает — не блокируем обработку
+
+
+def cross_account_release(order_id: str) -> None:
+    """Снять наш claim: путь без отправки (скип/скрыт/сбой), заказ свободен."""
+    try:
+        (config.CROSS_ACCOUNT_DIR / f"{order_id}.claim").unlink()
     except OSError:
         pass
 
@@ -226,6 +273,8 @@ def _terminal(store, order_id: str, *, send_status: str, draft_status: str, note
 
 
 def _unavailable(store, order_id: str, exc: Exception, *, draft_exists: bool) -> str:
+    # Заказ недоступен — кросс-акковый claim снимаем, заказ свободен.
+    cross_account_release(order_id)
     note = f"скип: unavailable — {str(exc)[:170]}"
     if draft_exists:
         store.set_send_status(order_id, "skipped")
@@ -298,6 +347,18 @@ def process_open_candidate(
         OUTREACH_VARIANT_IDS,
     )
 
+    # Кросс-акковый claim ДО браузера и LLM: другой аккаунт на этой машине
+    # мог взять заказ секунды назад (инфо/profi3, оба информатика). Дальше
+    # по функции: каждый путь без отправки обязан снять claim.
+    if not cross_account_claim(order_id):
+        return _terminal(
+            store,
+            order_id,
+            send_status="skipped",
+            draft_status="skipped",
+            note="скип: заказ уже взят другим аккаунтом (cross-account)",
+        )
+
     # Форму открываем ДО генерации ответа: если комиссионный тариф не
     # применился (в футере «К оплате: N ₽» при режиме комиссии), заказ всё
     # равно уйдёт в скип — раньше мы об этом узнавали только после LLM.
@@ -307,6 +368,7 @@ def process_open_candidate(
         return _unavailable(store, order_id, exc, draft_exists=False)
     except respond_mod.CommissionExhaustedError as exc:
         mark_commission_exhausted()
+        cross_account_release(order_id)
         return _terminal(
             store,
             order_id,
@@ -317,6 +379,7 @@ def process_open_candidate(
     except Exception as exc:
         # Отсутствие CTA/тарифов без подтверждённого hidden-marker — технический
         # сбой/изменение UI, а не доказательство недоступного заказа.
+        cross_account_release(order_id)
         return _terminal(
             store,
             order_id,
@@ -334,6 +397,7 @@ def process_open_candidate(
         except Exception:
             early_to_pay = None
         if early_to_pay:
+            cross_account_release(order_id)
             return _terminal(
                 store,
                 order_id,
@@ -357,11 +421,13 @@ def process_open_candidate(
         on_limit=on_limit,
     )
     if decision.action == "skip":
+        cross_account_release(order_id)
         store.set_draft(order_id, "skipped", source=decision.source)
         store.set_send_status(order_id, "skipped")
         store.set_note(order_id, f"скип {decision.source or 'flow'}: {decision.reason}")
         return "skipped"
     if decision.action != "send" or not decision.text:
+        cross_account_release(order_id)
         return _terminal(
             store,
             order_id,
@@ -377,6 +443,7 @@ def process_open_candidate(
         source=decision.source,
     )
     if not store.claim_send(order_id):
+        cross_account_release(order_id)
         store.set_note(order_id, "fast-path: send уже захвачен/завершён другим процессом")
         return "already_processed"
 
@@ -392,26 +459,31 @@ def process_open_candidate(
         return _unavailable(store, order_id, exc, draft_exists=True)
     except respond_mod.CommissionExhaustedError as exc:
         mark_commission_exhausted()
+        cross_account_release(order_id)
         store.set_send_status(order_id, "skipped")
         store.set_note(order_id, f"скип: {str(exc)[:160]} — аккаунт до завтра стоит")
         return "skipped"
     except Exception as exc:
+        cross_account_release(order_id)
         store.set_send_status(order_id, "failed")
         store.set_note(order_id, f"fast-path form failed: {str(exc)[:180]}")
         return "failed"
 
     due, why = _payment_due(config.RESPOND_MODE, footer)
     if due is None:
+        cross_account_release(order_id)
         store.set_send_status(order_id, "skipped")
         store.set_note(order_id, f"скип: {why}")
         return "skipped"
 
     if not in_work_hours():
+        cross_account_release(order_id)
         store.set_send_status(order_id, "skipped")
         store.set_note(order_id, "скип: рабочее окно завершилось перед отправкой")
         return "skipped"
 
     if config.DAILY_SEND_LIMIT and store.sends_today() >= config.DAILY_SEND_LIMIT:
+        cross_account_release(order_id)
         store.set_send_status(order_id, "skipped")
         store.set_note(order_id, "скип: дневной лимит достигнут перед отправкой")
         return "skipped"
@@ -433,6 +505,7 @@ def process_open_candidate(
         status = "sent"
     elif respond_mod.send_failed(outcome):
         status = "failed"
+        cross_account_release(order_id)  # отклик не прошёл — заказ свободен
     else:
         status = "unknown"
 

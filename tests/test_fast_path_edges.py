@@ -15,10 +15,12 @@ from profi.storage import Store
 
 
 @pytest.fixture(autouse=True)
-def _fastpath_inside_work_hours(monkeypatch):
+def _fastpath_inside_work_hours(monkeypatch, tmp_path):
     import profi.fastpath as fastpath
 
     monkeypatch.setattr(fastpath, "in_work_hours", lambda: True)
+    # claim-маркеры не должны трогать реальную data/ из тестов
+    monkeypatch.setattr(fastpath.config, "CROSS_ACCOUNT_DIR", tmp_path / "cross-account")
 
 
 ROOT = Path(__file__).resolve().parents[1]

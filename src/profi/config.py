@@ -47,6 +47,13 @@ DATA_DIR = PROJECT_DIR / "data"
 LOG_DIR = PROJECT_DIR / "logs"
 DB_PATH = Path(_get("PROFI_DB", str(DATA_DIR / "profi.db")))
 
+# Общая для всех аккаунтов папка cross-account claim-маркеров. Инфо и profi3
+# (оба информатика) отвечали на одни свежие заказы с разницей в 1–2 минуты
+# (06–07.09: 5 коллизий) — дважды тратили комиссионную квоту на один заказ.
+CROSS_ACCOUNT_DIR = DATA_DIR / "cross-account"
+# Протухший claim (воркер умер посреди обработки) не держит заказ вечно.
+CROSS_ACCOUNT_CLAIM_TTL_S = 6 * 60 * 60
+
 # --- Разделение нескольких акков на одной машине: свой лог и лок ---
 # PROFI_LOG_TAG задаётся в accounts/<акк>.env; пустой = старые имена файлов.
 LOG_TAG = _get("PROFI_LOG_TAG", "").strip()

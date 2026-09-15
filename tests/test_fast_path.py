@@ -21,10 +21,12 @@ from profi.storage import Store
 
 
 @pytest.fixture(autouse=True)
-def _fastpath_inside_work_hours(monkeypatch):
+def _fastpath_inside_work_hours(monkeypatch, tmp_path):
     import profi.fastpath as fastpath
 
     monkeypatch.setattr(fastpath, "in_work_hours", lambda: True)
+    # claim-маркеры не должны трогать реальную data/ из тестов
+    monkeypatch.setattr(fastpath.config, "CROSS_ACCOUNT_DIR", tmp_path / "cross-account")
 
 
 def _details(**overrides):
@@ -299,6 +301,120 @@ class _FakeStore:
 
     def record_response(self, order_id, mode, paid_rub):
         self.calls.append(("response", mode, paid_rub))
+
+
+class TestCrossAccountClaim:
+    """Инфо и profi3 отвечали на одни заказы дважды (06-07.09, 5 коллизий)."""
+
+    def test_claim_is_atomic_and_released(self, tmp_path, monkeypatch):
+        import profi.fastpath as fastpath
+
+        monkeypatch.setattr(fastpath.config, "CROSS_ACCOUNT_DIR", tmp_path / "xa")
+        assert fastpath.cross_account_claim("93400001") is True
+        assert fastpath.cross_account_claim("93400001") is False
+        fastpath.cross_account_release("93400001")
+        assert fastpath.cross_account_claim("93400001") is True
+
+    def test_stale_claim_is_taken_over(self, tmp_path, monkeypatch):
+        import os
+        import time
+
+        import profi.fastpath as fastpath
+
+        d = tmp_path / "xa"
+        monkeypatch.setattr(fastpath.config, "CROSS_ACCOUNT_DIR", d)
+        monkeypatch.setattr(fastpath.config, "CROSS_ACCOUNT_CLAIM_TTL_S", 60)
+        d.mkdir()
+        stale = d / "93400002.claim"
+        stale.write_text("other", encoding="utf-8")
+        old = time.time() - 3600
+        os.utime(stale, (old, old))
+        assert fastpath.cross_account_claim("93400002") is True
+
+    def test_other_account_order_is_skipped_before_llm(self, tmp_path, monkeypatch):
+        import profi.fastpath as fastpath
+
+        store = _FakeStore()
+        d = tmp_path / "xa"
+        d.mkdir()
+        (d / "93400001.claim").write_text("profi3", encoding="utf-8")
+        monkeypatch.setattr(fastpath.config, "CROSS_ACCOUNT_DIR", d)
+        monkeypatch.setattr(
+            fastpath,
+            "decide_reply",
+            lambda *a, **k: pytest.fail("LLM must not run on a cross-account claimed order"),
+        )
+        monkeypatch.setattr(
+            fastpath.respond_mod,
+            "_open_respond_form_inner",
+            lambda *a, **k: pytest.fail("browser must not be touched on a claimed order"),
+        )
+        monkeypatch.setattr(fastpath.config, "RESPOND_MODE", "pay")
+        monkeypatch.setattr(fastpath.config, "DAILY_SEND_LIMIT", 0)
+
+        status = process_open_candidate(
+            object(), object(), store, "93400001", _details(),
+            system_prompt_factory=lambda: "system", user_prompt="order",
+        )
+        assert status == "skipped"
+        notes = [c[1] for c in store.calls if c[0] == "note"]
+        assert any("другим аккаунтом" in n for n in notes)
+        # чужой claim не сносим
+        assert (d / "93400001.claim").exists()
+
+    def test_skip_after_claim_releases_order(self, tmp_path, monkeypatch):
+        """LLM сказал скип — заказ освобождён для другого аккаунта."""
+        import profi.fastpath as fastpath
+
+        store = _FakeStore()
+        d = tmp_path / "xa"
+        monkeypatch.setattr(fastpath.config, "CROSS_ACCOUNT_DIR", d)
+        monkeypatch.setattr(
+            fastpath, "decide_reply",
+            lambda *a, **k: Decision("skip", "не наш формат", None, "llm"),
+        )
+        monkeypatch.setattr(fastpath.respond_mod, "_open_respond_form_inner", lambda p, mode: p)
+        monkeypatch.setattr(fastpath.config, "RESPOND_MODE", "pay")
+        monkeypatch.setattr(fastpath.config, "DAILY_SEND_LIMIT", 0)
+
+        status = process_open_candidate(
+            object(), object(), store, "93400009", _details(),
+            system_prompt_factory=lambda: "system", user_prompt="order",
+        )
+        assert status == "skipped"
+        assert not (d / "93400009.claim").exists()
+
+    def test_successful_send_keeps_claim(self, tmp_path, monkeypatch):
+        import profi.fastpath as fastpath
+
+        store = _FakeStore()
+        d = tmp_path / "xa"
+        monkeypatch.setattr(fastpath.config, "CROSS_ACCOUNT_DIR", d)
+        monkeypatch.setattr(
+            fastpath, "decide_reply",
+            lambda *a, **k: Decision("send", "подходит", "Т" * 150, "llm"),
+        )
+        monkeypatch.setattr(fastpath.respond_mod, "_open_respond_form_inner", lambda p, mode: p)
+        monkeypatch.setattr(
+            fastpath.respond_mod,
+            "fill_form",
+            lambda p, rate, text, mode: {"to_pay": 0, "send_button_found": True},
+        )
+        monkeypatch.setattr(
+            fastpath.respond_mod,
+            "click_send",
+            lambda p, c, rate=None: {"url_after": "https://profi.ru/backoffice/r.php?id=93400010"},
+        )
+        monkeypatch.setattr(fastpath.respond_mod, "send_failed", lambda outcome: False)
+        monkeypatch.setattr(fastpath.config, "RESPOND_MODE", "commission")
+        monkeypatch.setattr(fastpath.config, "DAILY_SEND_LIMIT", 0)
+
+        status = process_open_candidate(
+            object(), object(), store, "93400010", _details(),
+            system_prompt_factory=lambda: "system", user_prompt="order",
+        )
+        assert status == "sent"
+        assert (d / "93400010.claim").exists()
 
 
 class TestProcessOpenCandidate:

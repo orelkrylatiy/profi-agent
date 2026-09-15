@@ -5,6 +5,14 @@ import pytest
 from profi.fastpath import Decision, process_open_candidate
 
 
+@pytest.fixture(autouse=True)
+def _fastpath_inside_work_hours(monkeypatch, tmp_path):
+    import profi.fastpath as fastpath
+
+    # claim-маркеры не должны трогать реальную data/ из тестов
+    monkeypatch.setattr(fastpath.config, "CROSS_ACCOUNT_DIR", tmp_path / "cross-account")
+
+
 class _Store:
     def __init__(self):
         self.status = "not_sent"
