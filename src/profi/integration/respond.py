@@ -19,7 +19,7 @@ import time
 from playwright.sync_api import BrowserContext, Page, Response
 
 from profi.integration.orders import open_candidate
-from profi.utils.pacing import human_pause, type_human
+from profi.utils.pacing import clear_field, human_pause, type_human
 
 log = logging.getLogger("profi.respond")
 
@@ -290,6 +290,7 @@ def _bad_rate_value(win, rate: str) -> str | None:
     Инцидент 2026-09-02: input_value() первого инпута возвращал «2000», а на
     экране стояло «20002000» (rpc 400, отправка не прошла). Проверяем ВСЕ
     видимые инпуты окна: любой непустой, не равный ставке, — отмена.
+    rate="" — «любой непустой инпут плох» (commission: ставки быть не должно).
     """
     for el in win.locator("input:visible").all():
         try:
@@ -301,12 +302,35 @@ def _bad_rate_value(win, rate: str) -> str | None:
     return None
 
 
+def ensure_no_commission_rate(order_page: Page, win) -> str | None:
+    """commission-режим: в форме не должно быть ставки — вернуть утечку (или None).
+
+    Сайт иногда сам подставляет в «Цена» прошлое/дефолтное значение — тогда
+    клиент видит цену, а отклик фактически платный, хотя владелец думал, что
+    шлёт комиссионный. Одна попытка самолечения: снять подстановку доверенными
+    нажатиями (clear_field) и перепроверить. Осталась — вернём значение,
+    вызывающий решает: отменить отправку.
+    """
+    leak = _bad_rate_value(win, "")
+    if not leak:
+        return None
+    log.warning("commission: в форме подставлена ставка %r — чищу поле", leak)
+    for el in win.locator("input:visible").all():
+        try:
+            if (el.input_value(timeout=2_000) or "").strip():
+                clear_field(order_page, el)
+        except Exception:
+            continue
+    return _bad_rate_value(win, "")
+
+
 def fill_form(order_page: Page, rate: int, text: str, mode: str = "pay") -> dict:
     """Заполнить форму отклика: сообщение + (в pay-режиме) ставку.
 
     mode="commission": ставку НЕ заполняем (решение владельца 2026-09-02) —
     при комиссии нет предоплаты, цена занятия обсуждается с клиентом после.
-    Единица «час» — дефолт, не трогаем.
+    Единица «час» — дефолт, не трогаем. Дополнительно следим, чтобы сайт сам
+    не подставил ставку в поле (автозаполнение) — Макс, 15.09.
     """
     win = order_page.get_by_test_id(BID_WINDOW_TESTID).first
     textarea = win.locator("textarea").first
@@ -340,6 +364,17 @@ def fill_form(order_page: Page, rate: int, text: str, mode: str = "pay") -> dict
 
     # даём UI пересчитать цену
     order_page.wait_for_timeout(1500)
+
+    if mode == "commission":
+        # Ставку не вводили, но сайт мог подставить её сам (автозаполнение
+        # прошлого значения) — проверяем после набора текста, чтобы поймать
+        # и позднюю подстановку. Второй, жёсткий гейт — в click_send.
+        leak = ensure_no_commission_rate(order_page, win)
+        if leak:
+            raise RespondError(
+                f"commission: в форме осталась подставленная ставка {leak!r} — отправка отменена"
+            )
+
     return read_footer(order_page)
 
 
@@ -368,7 +403,9 @@ def click_send(order_page: Page, ctx: BrowserContext, rate: int | None = None) -
     Вызывать ТОЛЬКО с явным разрешения. Ловим RPC /backoffice/api/
     (claimOrder) и graphql-ответы вокруг клика + итоговый URL.
     rate — финальный денежный гейт: прямо перед кликом сверяем все видимые
-    поля окна (в commission-режиме передавай None — ставки нет).
+    поля окна. rate=None (commission) — наоборот: в форме не должно быть НИ
+    ОДНОГО непустого инпута, иначе это автоподстановка ставки сайта
+    (Макс, 15.09) — отправка отменяется.
     """
     rpc_events: list[str] = []
 
@@ -399,6 +436,17 @@ def click_send(order_page: Page, ctx: BrowserContext, rate: int | None = None) -
                     rate,
                 )
                 raise RespondError(f"мусор в форме перед отправкой: {bad!r}")
+        else:
+            # commission: ставки в форме быть не должно. Любой непустой инпут —
+            # автоподстановка сайта; жать кнопку нельзя, самолечить поздно —
+            # fill_form уже чистил, значит UI настойчиво возвращает значение.
+            bad = _bad_rate_value(order_page.get_by_test_id(BID_WINDOW_TESTID).first, "")
+            if bad:
+                log.error(
+                    "ОТМЕНА перед кликом: commission-форма с подставленной ставкой %r",
+                    bad,
+                )
+                raise RespondError(f"commission: мусор в форме перед отправкой: {bad!r}")
         human_pause(1.5, 3.0)
         btn.first.click(delay=random.randint(80, 160))
         order_page.wait_for_timeout(3000)

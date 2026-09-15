@@ -35,3 +35,15 @@ def type_human(page, locator, text: str, clear: bool = False) -> None:
         i += len(chunk)
         if i < len(text):
             time.sleep(random.uniform(0.15, 0.6))
+
+
+def clear_field(page, locator) -> None:
+    """Очистить поле доверенными нажатиями (RULES §1): тройной клик +
+    Cmd/Ctrl+A + Backspace. Для commission-формы: снимает автоподстановку
+    ставки сайтом (type_human с пустым текстом выделение не удаляет)."""
+    locator.click(click_count=3, delay=random.randint(50, 110))
+    mod = "Meta" if sys.platform == "darwin" else "Control"
+    page.keyboard.press(f"{mod}+a")
+    time.sleep(random.uniform(0.08, 0.2))
+    page.keyboard.press("Backspace")
+    time.sleep(random.uniform(0.1, 0.3))

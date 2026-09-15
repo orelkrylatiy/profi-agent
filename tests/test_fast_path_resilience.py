@@ -46,6 +46,15 @@ class _Store:
         self.calls.append(("response", mode, paid_rub))
 
 
+@pytest.fixture(autouse=True)
+def _isolated_cross_account(tmp_path, monkeypatch):
+    # claim-маркеры не должны трогать реальную data/ из тестов (иначе успешный
+    # тест оставляет claim и следующий прогон скипает «заказ уже взят»)
+    import profi.fastpath as fastpath
+
+    monkeypatch.setattr(fastpath.config, "CROSS_ACCOUNT_DIR", tmp_path / "cross-account")
+
+
 def _details():
     return {
         "id": "93790001",
